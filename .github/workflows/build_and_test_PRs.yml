@@ -66,8 +66,9 @@ jobs:
 
         - name: Build the Distribution
           working-directory: build
+          shell: pwsh
           run: |
-            devenv MySQL.sln /build RelWithDebInfo
+            cmake --build . --config RelWithDebInfo
 
         - name: Run Tests
           working-directory: build/mysql-test
