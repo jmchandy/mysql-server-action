@@ -44,17 +44,19 @@ jobs:
       run: choco install openssl -y
 
     - name: Check OpenSSL version
-      run: & "C:\Program Files\OpenSSL\bin\openssl.exe" version -a 
+      run: |
+        & "C:\Program Files\OpenSSL\bin\openssl.exe" version -a 
 
     - name: Configure the Distribution
       run: |
         mkdir build
         cd build
-        cmake .. build -G "Visual Studio 17 2022" -A x64 -DWITH_SSL="C:/Program Files/OpenSSL"
+        cmake .. -G "Visual Studio 17 2022" -A x64 -DWITH_SSL="C:/Program Files/OpenSSL"
+        
     - name: Build the Distribution
       working-directory: build
       run: devenv MySQL.sln /build RelWithDebInfo
 
     - name: Run Tests
       working-directory: build/mysql-test
-      run: ./mysqltest-run.pl --force --timer --vs-config=RelWithDebInfo
+      run: ./mysql-test-run.pl --force --timer --vs-config=RelWithDebInfo
