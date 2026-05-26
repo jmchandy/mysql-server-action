@@ -43,17 +43,11 @@ jobs:
     - name: Install Dependencies 
       run: choco install openssl -y
 
-    - name: Find OpenSSL
-      run: |
-        Get-Command openssl -ErrorAction SilentlyContinue
-        Get-ChildItem 'C:\Program Files' -Recurse -Filter applink.c -ErrorAction SilentlyContinue
-        Get-ChildItem 'C:\' -Recurse -Filter applink.c -ErrorAction SilentlyContinue  
-
     - name: Configure the Distribution
       run: |
         mkdir build
         cd build
-        cmake .. build -G "Visual Studio 17 2022" -A x64 -DWITH_SSL=yes
+        cmake .. build -G "Visual Studio 17 2022" -A x64 -DWITH_SSL="C:/Program Files/OpenSSL"
     - name: Build the Distribution
       working-directory: build
       run: devenv MySQL.sln /build RelWithDebInfo
