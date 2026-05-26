@@ -36,30 +36,32 @@ jobs:
 #Build on windows
   windows-build:
     runs-on: windows-latest
-    
+
     steps:
-    - uses: actions/checkout@v6
+        - uses: actions/checkout@v6
 
-    - name: Find OpenSSL root
-      shell: pwsh
-      run: |
-        $opensslExe = (Get-Command openssl).Source
-        $opensslRoot = Split-Path (Split-Path $opensslExe -Parent) -Parent
-        Write-Host "OpenSSL exe: $opensslExe"
-        Write-Host "OpenSSL root: $opensslRoot"
-        echo "OPENSSL_ROOT=$opensslRoot" >> $env:GITHUB_ENV
+        - name: Install Bison
+          shell: pwsh
+          run: |
+            choco install winflexbison3 -y
 
-    - name: Configure the Distribution
-      shell: pwsh
-      run: |
-        mkdir build
-        cd build
-        cmake .. -G "Visual Studio 17 2022" -A x64 -DWITH_SSL="$env:OPENSSL_ROOT"
-        
-    - name: Build the Distribution
-      working-directory: build
-      run: devenv MySQL.sln /build RelWithDebInfo
+        - name: Add Bison to PATH
+          shell: pwsh
+          run: |
+            echo "C:\ProgramData\chocolatey\lib\winflexbison3\tools" >> $env:GITHUB_PATH
 
-    - name: Run Tests
-      working-directory: build/mysql-test
-      run: ./mysql-test-run.pl --force --timer --vs-config=RelWithDebInfo
+        - name: Configure the Distribution
+          shell: pwsh
+          run: |
+            if (Test-Path build) { Remove-Item -Recurse -Force build }
+            cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+
+        - name: Build the Distribution
+          working-directory: build
+          run: |
+            devenv MySQL.sln /build RelWithDebInfo
+
+        - name: Run Tests
+          working-directory: build/mysql-test
+          run: |
+            .\mysql-test-run.pl --force --timer --vs-config=RelWithDebInfo
