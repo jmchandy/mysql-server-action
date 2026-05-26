@@ -41,7 +41,7 @@ jobs:
     - uses: actions/checkout@v6
 
     - name: Install Dependencies 
-      run: choco install openssl -y
+      run: choco install openssl --version=3.3.1 -y
 
     - name: Check OpenSSL version
       run: |
@@ -51,7 +51,7 @@ jobs:
       run: |
         mkdir build
         cd build
-        cmake .. -G "Visual Studio 17 2022" -A x64 -DWITH_SSL="C:/Program Files/OpenSSL"
+        cmake .. -G "Visual Studio 17 2022" -A x64 -DWITH_SSL=openssl3
         
     - name: Build the Distribution
       working-directory: build
