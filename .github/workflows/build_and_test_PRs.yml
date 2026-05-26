@@ -43,6 +43,12 @@ jobs:
     - name: Install Dependencies 
       run: choco install openssl -y
 
+    - name: Find OpenSSL
+      run: |
+        Get-Command openssl -ErrorAction SilentlyContinue
+        Get-ChildItem 'C:\Program Files' -Recurse -Filter applink.c -ErrorAction SilentlyContinue
+        Get-ChildItem 'C:\' -Recurse -Filter applink.c -ErrorAction SilentlyContinue  
+
     - name: Configure the Distribution
       run: |
         mkdir build
