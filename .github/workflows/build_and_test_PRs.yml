@@ -1,0 +1,55 @@
+#Build and run basic tests on pull requests 
+name: Build and test PRs on mysql-server repo
+
+#Trigger workflow on pull requests to trunk branch of repo
+on:
+  pull_request:
+    branches: [ "trunk" ]
+
+jobs:
+#Build on ubuntu
+  ubuntu-build:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v6
+
+    - name: Install Dependencies 
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cmake make gcc g++ perl bison libssl-dev libncurses-dev
+
+    - name: Configure the Distribution
+      run: |
+        mkdir build
+        cd build
+        cmake ..
+
+    - name: Build the Distribution
+      working-directory: build
+      run: make
+
+    - name: Run Tests
+      working-directory: build/mysql-test
+      run: ./mysql-test-run.pl --do-suite=main --force --timer
+         
+#Build on windows
+  windows-build:
+    runs-on: windows-latest
+    
+    steps:
+    - uses: actions/checkout@v6
+
+    - name: Configure the Distribution
+      run: |
+        mkdir build
+        cd build
+        cmake -G "Visual Studio 17 2022" -A x64
+
+    - name: Build the Distribution
+      working-directory: build
+      run: devenv MySQL.sln /build RelWithDebInfo
+
+    - name: Run Tests
+      working-directory: build/mysql-test
+      run: ./mysqltest-run.pl --force --timer --vs-config=RelWithDebInfo
