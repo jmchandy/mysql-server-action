@@ -36,3 +36,8 @@ jobs:
      working-directory: build
      run: |
         cmake --build . --config RelWithDebInfo     
+
+   - name: Run Tests
+     working-directory: build/mysql-test
+     run: |
+        .\mysql-test-run.pl --force --timer --vs-config=RelWithDebInfo     
