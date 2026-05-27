@@ -19,6 +19,13 @@ jobs:
         $opensslRoot = Split-Path (Split-Path $opensslExe -Parent) -Parent
         echo "OPENSSL_ROOT=$opensslRoot" >> $env:GITHUB_ENV
 
+   - name: Check Bison
+     run: |
+        where.exe bison
+        bison --version
+        Test-Path sql\sql_yacc.yy
+        Test-Path sql\sql_yacc.h     
+
    - name: Configure the Distribution
      run: |
         cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DWITH_SSL="$env:OPENSSL_ROOT"
