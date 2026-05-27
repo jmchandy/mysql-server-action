@@ -19,12 +19,13 @@ jobs:
         $opensslRoot = Split-Path (Split-Path $opensslExe -Parent) -Parent
         echo "OPENSSL_ROOT=$opensslRoot" >> $env:GITHUB_ENV
 
+   - name: Install Bison
+     run: choco install winflexbison3 -y
+
    - name: Check Bison
      run: |
         where.exe bison
-        bison --version
-        Test-Path sql\sql_yacc.yy
-        Test-Path sql\sql_yacc.h     
+        bison --version    
 
    - name: Configure the Distribution
      run: |
