@@ -22,6 +22,12 @@ jobs:
    - name: Install Bison
      run: choco install winflexbison3 -y
 
+   - name: Expose Bison as bison.exe
+     run: |
+        $winBison = (Get-Command win_bison -ErrorAction SilentlyContinue).Source
+        if (-not $winBison) { throw "win_bison not found" }
+        Copy-Item $winBison "C:\ProgramData\chocolatey\bin\bison.exe" -Force  
+
    - name: Check Bison
      run: |
         where.exe bison
