@@ -1,0 +1,22 @@
+name: Build and test PRs on mysql-server repo
+
+on:
+ pull_request:
+   branches:
+     - trunk
+
+jobs:
+ windows-build:
+   runs-on: windows-latest
+
+   steps:
+
+   - uses: actions/checkout@v6
+
+   - name: Check OpenSSL
+     run: |
+        & "C:\Program Files\OpenSSL\bin\openssl.exe" version -a
+
+   - name: Configure the Distribution
+     run: |
+        cmake -S . -B build -G "Visual Studio 17 2022" -A x64
