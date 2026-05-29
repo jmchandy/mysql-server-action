@@ -28,6 +28,11 @@ jobs:
         if (-not $winBison) { throw "win_bison not found" }
         Copy-Item $winBison "C:\ProgramData\chocolatey\bin\bison.exe" -Force    
 
+   - name: Install Cygwin
+     run: |
+        choco install cygwin -y
+        C:\tools\cygwin\cygwinsetup.exe -q -P perl,perl_modules,diffutils,patch
+         
    - name: Configure the Distribution
      run: |
         cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DWITH_SSL="$env:OPENSSL_ROOT"
@@ -38,6 +43,8 @@ jobs:
         cmake --build . --config RelWithDebInfo     
 
    - name: Run Tests
+     shell: bash
      working-directory: build/mysql-test
      run: |
-        ./mysql-test-run.pl --do-suite=main --force --timer --vs-config=RelWithDebInfo   
+        export MTR_VS_CONFIG=RelWithDebInfo
+        ./mysql-test-run.pl --do-suite=main --force --timer
