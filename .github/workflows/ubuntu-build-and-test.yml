@@ -21,9 +21,7 @@ jobs:
 
     - name: Configure the Distribution
       run: |
-        mkdir build
-        cd build
-        cmake ..
+        cmake -S . -B build
 
     - name: Build the Distribution
       working-directory: build
