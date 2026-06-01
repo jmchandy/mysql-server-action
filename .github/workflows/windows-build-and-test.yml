@@ -60,17 +60,7 @@ jobs:
 
       - name: Verify Cygwin Environment
         run: |
-          & "$env:CYGWIN_BASH" -lc '
-            echo "Shell:"
-            uname -a
-
-            echo "Perl:"
-            which perl
-            perl -v
-
-            echo "Diff:"
-            which diff
-          '
+          & "$env:CYGWIN_BASH" -lc "uname -a; which perl; perl -v; which diff || true; ls -l /usr/bin/diff* || true"
 
       - name: Configure the Distribution
         run: |
@@ -82,8 +72,4 @@ jobs:
 
       - name: Run Tests
         run: |
-          & "$env:CYGWIN_BASH" -lc '
-            cd /cygdrive/d/a/mysql-server-action/mysql-server-action/build/mysql-test
-            export MTR_VS_CONFIG=RelWithDebInfo
-            ./mysql-test-run.pl --do-suite=main --force --timer
-          '
+          & "$env:CYGWIN_BASH" -lc "cd /cygdrive/d/a/mysql-server-action/mysql-server-action/build/mysql-test; export MTR_VS_CONFIG=RelWithDebInfo; ./mysql-test-run.pl --do-suite=main --force --timer"
