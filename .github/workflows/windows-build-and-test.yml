@@ -7,44 +7,45 @@ on:
 
 jobs:
   windows-build:
-    runs-on: windows-latest
+     runs-on: windows-latest
 
-    steps:
-      - name: Disable CRLF conversion
-        run: |
-           git config --global core.autocrlf false
-           git config --global core.eol lf
+     defaults:
+       run:
+         shell: powershell
 
-      - uses: actions/checkout@v6
+     steps:
+       - name: Enable long paths
+         run: git config --system core.longpaths true
 
-      - name: Find OpenSSL root
-        run: |
+       - uses: actions/checkout@v6
+
+       - name: Find OpenSSL root
+         run: |
            $opensslExe = (Get-Command openssl).Source
            $opensslRoot = Split-Path (Split-Path $opensslExe -Parent) -Parent
            "OPENSSL_ROOT=$opensslRoot" | Out-File -FilePath $env:GITHUB_ENV -Append
 
-      - name: Install Bison
-        run: choco install winflexbison3 -y
+       - name: Install Bison
+         run: choco install winflexbison3 -y
 
-      - name: Expose Bison as bison.exe
-        run: |
+       - name: Expose Bison as bison.exe
+         run: |
            $winBison = (Get-Command win_bison -ErrorAction SilentlyContinue).Source
            if (-not $winBison) { throw "win_bison not found" }
            Copy-Item $winBison "C:\ProgramData\chocolatey\bin\bison.exe" -Force
 
-      - name: Install Cygwin
-        run: |
-           choco install cygwin -y
-           C:\tools\cygwin\cygwinsetup.exe -q -P perl,perl_modules,diffutils,patch
+       - name: Install Strawberry Perl
+         run: choco install strawberryperl -y
 
-      - name: Configure the Distribution
-        run: |
-           cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DWITH_SSL="$env:OPENSSL_ROOT"
+       - name: Configure the Distribution
+         run: |
+           cmake -S . -B bld -G "Visual Studio 17 2022" -A x64 -DWITH_BOOST=C:\boost -DWITH_SSL="$env:OPENSSL_ROOT"
 
-      - name: Build the Distribution
-        run: |
-           cmake --build build --config RelWithDebInfo
+       - name: Build the Distribution
+         run: |
+           cmake --build bld -- /m
 
-      - name: Run Tests
-        run: |
-           & "C:\tools\cygwin\bin\bash.exe" -lc "cd /cygdrive/d/a/mysql-server-action/mysql-server-action/build/mysql-test && export MTR_VS_CONFIG=RelWithDebInfo && ./mysql-test-run.pl --do-suite=main --timer --testcase-timeout=30 --suite-timeout=300 --debug-server --force --comment=all-default-debug --skip-combinations --unit-tests-report --no-skip --skip-ndb --parallel=16 --test-progress=0"
+       - name: Run Tests
+         run: |
+           cd bld\mysql-test
+           perl mysql-test-run.pl --vardir=M:/var-dir --force --retry-failure=2 --retry=2 --max-test-fail=0 --report-unstable-tests --clean-vardir --xml-report="$env:GITHUB_WORKSPACE\mtr.xml" --summary-report="$env:GITHUB_WORKSPACE\mtr-86308.txt" 1st
