@@ -1,47 +1,78 @@
 name: Build and test PRs on mysql-server repo
 
 on:
- pull_request:
-   branches:
-     - trunk
+  pull_request:
+    branches:
+      - trunk
 
 jobs:
- windows-build:
-   runs-on: windows-latest
+  windows-build:
+    runs-on: windows-latest
 
-   steps:
+    defaults:
+      run:
+        shell: powershell
 
-   - name: Git setup
-     run: git config --system core.longpaths true
-     
-   - uses: actions/checkout@v6
-  
-   - name: Find OpenSSL root
-     run: |
-        $opensslExe = (Get-Command openssl).Source
-        $opensslRoot = Split-Path (Split-Path $opensslExe -Parent) -Parent
-        echo "OPENSSL_ROOT=$opensslRoot" >> $env:GITHUB_ENV
+    steps:
+      - name: Disable CRLF conversion
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.eol lf
 
-   - name: Install Bison
-     run: choco install winflexbison3 -y
+      - uses: actions/checkout@v6
 
-   - name: Expose Bison as bison.exe
-     run: |
-        $winBison = (Get-Command win_bison -ErrorAction SilentlyContinue).Source
-        if (-not $winBison) { throw "win_bison not found" }
-        Copy-Item $winBison "C:\ProgramData\chocolatey\bin\bison.exe" -Force    
+      - name: Find OpenSSL root
+        run: |
+          $opensslExe = (Get-Command openssl).Source
+          $opensslRoot = Split-Path (Split-Path $opensslExe -Parent) -Parent
+          "OPENSSL_ROOT=$opensslRoot" | Out-File -FilePath $env:GITHUB_ENV -Append
 
-   - name: Configure the Distribution
-     run: |
-        cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DWITH_SSL="$env:OPENSSL_ROOT"
+      - name: Install Bison
+        run: choco install winflexbison3 -y
 
-   - name: Build the Distribution
-     working-directory: build
-     run: |
-        cmake --build . --config RelWithDebInfo     
+      - name: Expose Bison as bison.exe
+        run: |
+          $winBison = (Get-Command win_bison -ErrorAction SilentlyContinue).Source
+          if (-not $winBison) { throw "win_bison not found" }
+          Copy-Item $winBison "C:\ProgramData\chocolatey\bin\bison.exe" -Force
 
-   - name: Run Tests
-     working-directory: build/mysql-test
-     run: |
-        $env:MTR_VS_CONFIG = "RelWithDebInfo"
-        perl .\mysql-test-run.pl --do-suite=main --force --timer
+      - name: Install Cygwin
+        run: |
+          choco install cygwin -y
+          C:\tools\cygwin\cygwinsetup.exe -q -P perl,perl_modules,diffutils,patch
+          
+          # Verify Perl installation
+          & "C:\tools\cygwin\bin\bash.exe" -lc "which perl || { echo 'Perl not found!'; exit 1; }"
+
+      - name: Locate Cygwin
+        run: |
+          $candidates = @(
+            "C:\tools\cygwin\bin\bash.exe",
+            "C:\cygwin64\bin\bash.exe",
+            "C:\cygwin\bin\bash.exe"
+          )
+
+          $bash = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+
+          if (-not $bash) {
+            throw "Could not locate Cygwin bash.exe"
+          }
+
+          "CYGWIN_BASH=$bash" | Out-File -FilePath $env:GITHUB_ENV -Append
+          Write-Host "Found Cygwin at $bash"
+
+      - name: Verify Cygwin Environment
+        run: |
+          & "$env:CYGWIN_BASH" -lc "uname -a; which perl; perl -v; which diff || true; ls -l /usr/bin/diff* || true"
+
+      - name: Configure the Distribution
+        run: |
+          cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DWITH_SSL="$env:OPENSSL_ROOT"
+
+      - name: Build the Distribution
+        run: |
+          cmake --build build --config RelWithDebInfo
+
+      - name: Run Tests
+        run: |
+          & "$env:CYGWIN_BASH" -lc "export PATH=/usr/bin:/bin:`$PATH; cd /cygdrive/d/a/mysql-server-action/mysql-server-action/build/mysql-test; export MTR_VS_CONFIG=RelWithDebInfo; ./mysql-test-run.pl --do-suite=main --force --timer"
