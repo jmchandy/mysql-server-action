@@ -25,8 +25,29 @@ jobs:
 
     - name: Build the Distribution
       working-directory: build
-      run: make
+      run: make 2>&1 | tee ../build.log 
 
     - name: Run Tests
       working-directory: build/mysql-test
-      run: ./mysql-test-run.pl --do-suite=main --force --timer
+      run: ./mysql-test-run.pl --do-suite=main --force --timer 2>&1 | tee ../../mtr.log
+
+    - name: Upload build log
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: ubuntu-build-log
+        path: build.log   
+
+    - name: Upload MTR summary log
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: ubuntu-mtr-log
+        path: mtr.log
+
+    - name: Upload MTR detailed logs
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: ubuntu-mtr-details
+        path: build/mysql-test/var/log
