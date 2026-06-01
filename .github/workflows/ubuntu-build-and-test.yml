@@ -17,19 +17,34 @@ jobs:
     - name: Install Dependencies 
       run: |
         sudo apt-get update
-        sudo apt-get install -y cmake make gcc g++ perl bison libtirpc-dev libssl-dev libncurses-dev
+        sudo apt-get install -y cmake make gcc g++ perl bison libtirpc-dev libssl-dev libncurses-dev default-jdk maven
 
     - name: Configure the Distribution
       run: |
-        cmake -S . -B build
+        cmake -S . -B build -DWITH_ROUTER=0 -DWITH_MLE=1
 
     - name: Build the Distribution
       working-directory: build
-      run: make 2>&1 | tee ../build.log 
+      run: make -j$(nproc) 2>&1 | tee ../build.log
 
     - name: Run Tests
       working-directory: build/mysql-test
-      run: ./mysql-test-run.pl --do-suite=main --force --timer 2>&1 | tee ../../mtr.log
+      run: |
+          perl ./mysql-test-run.pl \
+            --nounit-tests \
+            --force \
+            --mem \
+            --retry-failure=2 \
+            --retry=2 \
+            --max-test-fail=0 \
+            --report-unstable-tests \
+            --clean-vardir \
+            --parallel=32 \
+            --do-suite=main \
+            --timer \
+            --xml-report="$GITHUB_WORKSPACE/mtr.xml" \
+            --summary-report="$GITHUB_WORKSPACE/mtr-summary.txt" \
+            2>&1 | tee ../../mtr.log
 
     - name: Upload build log
       if: always()
@@ -51,3 +66,17 @@ jobs:
       with:
         name: ubuntu-mtr-details
         path: build/mysql-test/var/log
+
+    - name: Upload MTR XML report
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: ubuntu-mtr-xml
+        path: mtr.xml
+
+    - name: Upload MTR summary report
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: ubuntu-mtr-summary
+        path: mtr-summary.txt
