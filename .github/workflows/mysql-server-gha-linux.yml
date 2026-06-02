@@ -2,7 +2,7 @@ name: Build and test PRs in mysql-server trunk branch on Oracle Linux
 
 on:
   pull_request:
-    branches: [ "trunk" ]
+    branches: [ "trunk" ] 
 
 jobs:
   linux-build:
