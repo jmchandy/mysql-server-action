@@ -1,0 +1,23 @@
+name: Build and test PRs in mysql-server trunk branch on Oracle Linux
+
+on:
+  pull_request:
+    branches: [ "trunk" ]
+
+jobs:
+  linux-build:
+    runs-on: 
+       - self-hosted
+       - Linux
+       - X64
+
+    steps:
+    - name: Verify runner
+      run: |
+        echo "Runner is working"
+        hostname
+        whoami
+        pwd
+        uname -a
+        nproc
+        free -h
