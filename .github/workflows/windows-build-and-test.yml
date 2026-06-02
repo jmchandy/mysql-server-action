@@ -47,5 +47,5 @@ jobs:
 
        - name: Run Tests
          run: |
-           cd bld\mysql-test
-           perl mysql-test-run.pl --vardir=M:/var-dir --force --retry-failure=2 --retry=2 --max-test-fail=0 --report-unstable-tests --clean-vardir --xml-report="$env:GITHUB_WORKSPACE\mtr.xml" --summary-report="$env:GITHUB_WORKSPACE\mtr-86308.txt" 1st
+            cd bld\mysql-test
+            perl mysql-test-run.pl --vardir=$env:TEMP\mysql-var-dir --force --retry-failure=2 --retry=2 --max-test-fail=0 --report-unstable-tests --clean-vardir --xml-report="$env:GITHUB_WORKSPACE\mtr.xml" --summary-report="$env:GITHUB_WORKSPACE\mtr-86308.txt" 1st
