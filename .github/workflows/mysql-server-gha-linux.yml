@@ -19,26 +19,184 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Environment
+      - name: Doxygen
+        if: hashFiles('Doxyfile.in') != ''
+        shell: bash
         run: |
-          hostname
-          whoami
-          pwd
-          uname -a
-          nproc
-          free -h
-          df -h
+          set -euo pipefail
 
-      - name: Configure
+          rm -rf build-doxygen
+          mkdir -p build-doxygen
+          cd build-doxygen
+
+          cmake ..
+          make doxygen
+
+      - name: Build
+        shell: bash
         run: |
           set -euo pipefail
           rm -rf bld
-          mkdir bld
+          mkdir -p bld
           cd bld
           cmake ..
+          make -j"$(nproc)"
 
-      - name: Build
+      - name: Create package
+        shell: bash
         run: |
           set -euo pipefail
+
           cd bld
-          make -j"$(nproc)"
+          make package
+
+      - name: MTR
+        shell: bash
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+
+          export XML_REPORT="${GITHUB_WORKSPACE}/mtr-${GITHUB_RUN_NUMBER}.xml"
+          export UNIT_REPORT="${GITHUB_WORKSPACE}/mtr-unit-${GITHUB_RUN_NUMBER}.xml"
+          export SUMMARY_REPORT="${GITHUB_WORKSPACE}/build-error_${GITHUB_RUN_NUMBER}.txt"
+          export MYSQL_TEST_DIR="${GITHUB_WORKSPACE}/bld/mysql-test"
+
+          if [ ! -d "${MYSQL_TEST_DIR}" ]; then
+            touch "${XML_REPORT}"
+            touch "${UNIT_REPORT}"
+            echo "skipped" > "${SUMMARY_REPORT}"
+            exit 0
+          fi
+
+          rm -rf /dev/shm/var_auto_* || true
+
+          cd "${MYSQL_TEST_DIR}"
+          perl mysql-test-run.pl \
+            --nounit-tests \
+            --force \
+            --mem \
+            --retry-failure=2 \
+            --retry=2 \
+            --max-test-fail=0 \
+            --report-unstable-tests \
+            --clean-vardir \
+            --parallel "$(nproc)" \
+            --xml-report="${XML_REPORT}" \
+            --summary-report="${SUMMARY_REPORT}"
+
+          cd "${GITHUB_WORKSPACE}/bld"
+          ctest -j "$(nproc)" --output-junit "${UNIT_REPORT}"
+
+      - name: Hypergraph MTR
+        shell: bash
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+
+          export HYPERGRAPH_REPORT="${GITHUB_WORKSPACE}/hypergraph_${GITHUB_RUN_NUMBER}.txt"
+          export MYSQL_TEST_DIR="${GITHUB_WORKSPACE}/bld/mysql-test"
+
+          rm -rf /dev/shm/var_auto_* || true
+
+          cd "${MYSQL_TEST_DIR}"
+          perl mysql-test-run.pl \
+            --nounit-tests \
+            --force \
+            --mem \
+            --retry-failure=2 \
+            --retry=2 \
+            --max-test-fail=0 \
+            --report-unstable-tests \
+            --clean-vardir \
+            --parallel "$(nproc)" \
+            --summary-report="${HYPERGRAPH_REPORT}" \
+            --hypergraph \
+            --skip-ndb \
+            --skip-suite=rapid
+
+      - name: Debug
+        shell: bash
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+
+          rm -rf debug
+          mkdir -p debug
+          cd debug
+
+          cmake .. -DCMAKE_BUILD_TYPE=Debug
+          make -j"$(nproc)"       
+
+      - name: Extra MTR suites
+        shell: bash
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+
+          export EXTRA_REPORT="${GITHUB_WORKSPACE}/extra_suites_${GITHUB_RUN_NUMBER}.txt"
+          export MYSQL_TEST_DIR="${GITHUB_WORKSPACE}/debug/mysql-test"
+          export EXTRA_SUITES="meb,meb_ddl,innodb_fts,innodb_undo,innodb_gis,innodb_zip"
+
+          if [ ! -d "${MYSQL_TEST_DIR}" ]; then
+            echo "debug tree not present, skipping" > "${EXTRA_REPORT}"
+            exit 0
+          fi
+
+          rm -rf /dev/shm/var_auto_* || true
+
+          cd "${MYSQL_TEST_DIR}"
+          perl mysql-test-run.pl \
+            --nounit-tests \
+            --force \
+            --mem \
+            --retry-failure=2 \
+            --retry=2 \
+            --max-test-fail=0 \
+            --report-unstable-tests \
+            --clean-vardir \
+            --parallel "$(nproc)" \
+            --summary-report="${EXTRA_REPORT}" \
+            --suite="${EXTRA_SUITES}"
+
+      - name: MTR Replication Testing
+        shell: bash
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+
+          export REPL_REPORT="${GITHUB_WORKSPACE}/mtr-replication.xml"
+          export REPL_SUMMARY="${GITHUB_WORKSPACE}/build-error_replication_${GITHUB_RUN_NUMBER}.txt"
+
+          rm -rf /dev/shm/var_auto_* || true
+
+          cd "${GITHUB_WORKSPACE}/bld/mysql-test"
+          perl mysql-test-run.pl \
+            --force \
+            --mem \
+            --retry-failure=2 \
+            --retry=2 \
+            --max-test-fail=0 \
+            --report-unstable-tests \
+            --clean-vardir \
+            --xml-report="${REPL_REPORT}" \
+            --summary-report="${REPL_SUMMARY}" \
+            --parallel "$(nproc)" \
+            --comment=group_replication \
+            --suite=group_replication
+
+      - name: xmllint
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          for f in \
+            "${GITHUB_WORKSPACE}"/mtr-*.xml \
+            "${GITHUB_WORKSPACE}"/mtr-unit-*.xml \
+            "${GITHUB_WORKSPACE}"/mtr-replication.xml
+          do
+            [ -e "$f" ] || continue
+            xmllint --noout "$f"
+          done
+            
+
+            
