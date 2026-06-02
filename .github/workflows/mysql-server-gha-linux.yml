@@ -11,13 +11,34 @@ jobs:
        - Linux
        - X64
 
+    timeout-minutes: 360
+
     steps:
-    - name: Verify runner
-      run: |
-        echo "Runner is working"
-        hostname
-        whoami
-        pwd
-        uname -a
-        nproc
-        free -h
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Environment
+        run: |
+          hostname
+          whoami
+          pwd
+          uname -a
+          nproc
+          free -h
+          df -h
+
+      - name: Configure
+        run: |
+          set -euo pipefail
+          rm -rf bld
+          mkdir bld
+          cd bld
+          cmake ..
+
+      - name: Build
+        run: |
+          set -euo pipefail
+          cd bld
+          make -j"$(nproc)"
