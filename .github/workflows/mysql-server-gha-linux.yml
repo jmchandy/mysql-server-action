@@ -19,8 +19,90 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Analyze changed files
+        id: diff
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          base_sha='${{ github.event.pull_request.base.sha }}'
+          head_sha='${{ github.event.pull_request.head.sha }}'
+          base_branch='${{ github.base_ref }}'
+
+          mapfile -t changed_files < <(
+            git diff --name-only "$base_sha" "$head_sha" | sed '/^$/d'
+          )
+
+          doxygen_skip_re='^(internal/cloud/(rapid/.*|mysql-test/suite/rapid.*|mysql-test/[^/]*$|components/vector_store_load/.*))$'
+          hypergraph_re='(hypergraph|sql/join_optimizer.*|sql/iterators.*|sql/range_optimizer.*|sql/sql_.*|sql/query_.*|sql/opt_.*|sql/window.*|sql/item.*|sql/handler.*|sql/histogram/.*)'
+          innodb_re='^(storage/innobase/|mysql-test/suite/innodb)'
+
+          skip_doxygen=false
+          enable_hypergraph=false
+          build_debug_tree=false
+          enable_rapid=false
+          enable_router=false
+          enable_ndb=false
+          enable_airglow=false
+          enable_mle=false
+          enable_extra_mtr=false
+          extra_mtr_mysql_test_dir="bld/mysql-test"
+
+          if (( ${#changed_files[@]} > 0 )); then
+            if printf '%s\n' "${changed_files[@]}" | grep -Eqv "$doxygen_skip_re"; then
+              skip_doxygen=false
+            else
+              skip_doxygen=true
+            fi
+
+            if printf '%s\n' "${changed_files[@]}" | grep -Eq "$hypergraph_re"; then
+              enable_hypergraph=true
+            fi
+
+            if printf '%s\n' "${changed_files[@]}" | grep -Eq "$innodb_re"; then
+              build_debug_tree=true
+            fi
+
+            if printf '%s\n' "${changed_files[@]}" | grep -Eq '^internal/cloud/rapid/'; then
+              enable_rapid=true
+            fi
+
+            if printf '%s\n' "${changed_files[@]}" | grep -Eq '^router/'; then
+              enable_router=true
+            fi
+
+            if printf '%s\n' "${changed_files[@]}" | grep -Eq '^(storage/ndb/|sql/dd/ndbinfo|mysql-test/suite/.*ndb)'; then
+              enable_ndb=true
+            fi
+
+            if printf '%s\n' "${changed_files[@]}" | grep -Eq '(innobase|innodb)'; then
+              enable_extra_mtr=true
+              extra_mtr_mysql_test_dir="debug/mysql-test"
+            fi
+          fi
+
+          if [[ "$base_branch" == "trunk" || "$base_branch" == "mysql-trunk" ]]; then
+            enable_rapid=true
+          fi
+
+          [[ -d internal/cloud/plugin/airglow ]] && enable_airglow=true
+          [[ -d internal/components/mle ]] && enable_mle=true
+
+          {
+            echo "skip_doxygen=$skip_doxygen"
+            echo "enable_hypergraph=$enable_hypergraph"
+            echo "build_debug_tree=$build_debug_tree"
+            echo "enable_rapid=$enable_rapid"
+            echo "enable_router=$enable_router"
+            echo "enable_ndb=$enable_ndb"
+            echo "enable_airglow=$enable_airglow"
+            echo "enable_mle=$enable_mle"
+            echo "enable_extra_mtr=$enable_extra_mtr"
+            echo "extra_mtr_mysql_test_dir=$extra_mtr_mysql_test_dir"
+          } >> "$GITHUB_OUTPUT"          
+
       - name: Doxygen
-        if: hashFiles('Doxyfile.in') != ''
+        if: steps.diff.outputs.skip_doxygen != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -31,17 +113,63 @@ jobs:
 
           cmake ..
           make doxygen
-
+          
       - name: Build
         shell: bash
         run: |
           set -euo pipefail
-          rm -rf bld
+
+          BUILD_OPTS=""
+
+          if [[ "${{ steps.diff.outputs.enable_rapid }}" == "true" ]]; then
+            BUILD_OPTS="$BUILD_OPTS -DWITH_RAPID=1"
+          fi
+
+          if [[ "${{ steps.diff.outputs.enable_router }}" == "true" ]]; then
+            BUILD_OPTS="$BUILD_OPTS -DWITH_ROUTER=1"
+          else
+            BUILD_OPTS="$BUILD_OPTS -DWITH_ROUTER=0"
+          fi
+
+          if [[ "${{ steps.diff.outputs.enable_ndb }}" == "true" ]]; then
+            BUILD_OPTS="$BUILD_OPTS -DWITH_NDBCLUSTER=1"
+          fi
+
+          if [[ "${{ steps.diff.outputs.enable_hypergraph }}" == "true" ]]; then
+            BUILD_OPTS="$BUILD_OPTS -DWITH_HYPERGRAPH_OPTIMIZER=ON"
+          fi
+
+          if [[ "${{ steps.diff.outputs.enable_airglow }}" == "true" ]]; then
+            BUILD_OPTS="$BUILD_OPTS -DWITH_AIRGLOW=1 -DWITH_LOGSVC=0"
+          fi
+
+          if [[ "${{ steps.diff.outputs.enable_mle }}" == "true" ]]; then
+            BUILD_OPTS="$BUILD_OPTS -DWITH_MLE=1"
+          fi
+
+          export PATH=/usr/lib/ccache:$PATH
+          export WITH_GMOCK=/usr/global/share
+          export WITH_BOOST=/usr/global/share
+
+          rm -rf "${GITHUB_WORKSPACE}/bld" "${GITHUB_WORKSPACE}/debug"
           mkdir -p bld
           cd bld
-          cmake ..
+
+          echo "cmake .. $BUILD_OPTS"
+          cmake .. $BUILD_OPTS
           make -j"$(nproc)"
 
+          if [[ "${{ steps.diff.outputs.build_debug_tree }}" == "true" ]]; then
+            cd "${GITHUB_WORKSPACE}"
+            mkdir -p debug
+            cd debug
+
+            DEBUG_OPTS="-DWITH_DEBUG=1 -DOPTIMIZE_DEBUG_BUILDS=1 $BUILD_OPTS"
+            echo "cmake .. $DEBUG_OPTS"
+            cmake .. $DEBUG_OPTS
+            make -j"$(nproc)"
+          fi
+          
       - name: Create package
         shell: bash
         run: |
@@ -88,6 +216,7 @@ jobs:
           ctest -j "$(nproc)" --output-junit "${UNIT_REPORT}"
 
       - name: Hypergraph MTR
+        if: steps.diff.outputs.enable_hypergraph == 'true'
         shell: bash
         continue-on-error: true
         run: |
@@ -112,39 +241,22 @@ jobs:
             --summary-report="${HYPERGRAPH_REPORT}" \
             --hypergraph \
             --skip-ndb \
-            --skip-suite=rapid
-
-      - name: Debug
-        shell: bash
-        continue-on-error: true
-        run: |
-          set -euo pipefail
-
-          rm -rf debug
-          mkdir -p debug
-          cd debug
-
-          cmake .. -DCMAKE_BUILD_TYPE=Debug
-          make -j"$(nproc)"       
+            --skip-suite=rapid    
 
       - name: Extra MTR suites
+        if: steps.diff.outputs.enable_extra_mtr == 'true'
         shell: bash
         continue-on-error: true
         run: |
           set -euo pipefail
 
-          export EXTRA_REPORT="${GITHUB_WORKSPACE}/extra_suites_${GITHUB_RUN_NUMBER}.txt"
-          export MYSQL_TEST_DIR="${GITHUB_WORKSPACE}/debug/mysql-test"
-          export EXTRA_SUITES="meb,meb_ddl,innodb_fts,innodb_undo,innodb_gis,innodb_zip"
-
-          if [ ! -d "${MYSQL_TEST_DIR}" ]; then
-            echo "debug tree not present, skipping" > "${EXTRA_REPORT}"
-            exit 0
-          fi
+          extra_report="${GITHUB_WORKSPACE}/extra_suites_${GITHUB_RUN_NUMBER}.txt"
+          mysql_test_dir="${GITHUB_WORKSPACE}/${{ steps.diff.outputs.extra_mtr_mysql_test_dir }}"
+          extra_suites=(meb meb_ddl innodb_fts innodb_undo innodb_gis innodb_zip)
 
           rm -rf /dev/shm/var_auto_* || true
 
-          cd "${MYSQL_TEST_DIR}"
+          cd "${mysql_test_dir}"
           perl mysql-test-run.pl \
             --nounit-tests \
             --force \
@@ -155,9 +267,42 @@ jobs:
             --report-unstable-tests \
             --clean-vardir \
             --parallel "$(nproc)" \
-            --summary-report="${EXTRA_REPORT}" \
-            --suite="${EXTRA_SUITES}"
+            --summary-report="${extra_report}" \
+            --suite="$(IFS=,; echo "${extra_suites[*]}")"
+            
+      - name: Debug
+        shell: bash
+        continue-on-error: true
+        run: |
+          set -euo pipefail
 
+          DEBUG_TEST_DIR="${GITHUB_WORKSPACE}/debug/mysql-test"
+          DEBUG_XML_REPORT="${GITHUB_WORKSPACE}/mtr-debug.xml"
+          DEBUG_SUMMARY_REPORT="${GITHUB_WORKSPACE}/build-error_debug_${GITHUB_RUN_NUMBER}.txt"
+          DEBUG_ERR_LOG="${GITHUB_WORKSPACE}/mtr.err"
+
+          if [ ! -d "${DEBUG_TEST_DIR}" ]; then
+            touch "${DEBUG_XML_REPORT}"
+            echo "skipped" > "${DEBUG_SUMMARY_REPORT}"
+            exit 0
+          fi
+
+          rm -rf /dev/shm/var_auto_* || true
+
+          cd "${DEBUG_TEST_DIR}"
+          perl mysql-test-run.pl \
+            --force \
+            --mem \
+            --retry-failure=2 \
+            --retry=2 \
+            --max-test-fail=0 \
+            --report-unstable-tests \
+            --clean-vardir \
+            --xml-report="${DEBUG_XML_REPORT}" \
+            --summary-report="${DEBUG_SUMMARY_REPORT}" \
+            --parallel "$(nproc)" \
+            2>&1 | tee "${DEBUG_ERR_LOG}"
+            
       - name: MTR Replication Testing
         shell: bash
         continue-on-error: true
@@ -197,6 +342,5 @@ jobs:
             [ -e "$f" ] || continue
             xmllint --noout "$f"
           done
-            
 
             
