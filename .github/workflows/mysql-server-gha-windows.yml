@@ -1,0 +1,16 @@
+name: Build and test PRs in mysql-server trunk branch on Oracle Linux
+
+on:
+  pull_request:
+    branches:
+      - trunk
+
+jobs:
+  windows-build:
+    runs-on: windows-latest
+
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
