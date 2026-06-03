@@ -19,6 +19,26 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Find OpenSSL
+        id: openssl
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $applink = Get-ChildItem "C:\Program Files","C:\Program Files (x86)" -Recurse -Filter applink.c -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+
+          if ($null -eq $applink) {
+            throw "Could not find applink.c on this runner"
+          }
+
+          $opensslRoot = Split-Path (Split-Path $applink.FullName -Parent) -Parent
+
+          Write-Host "Found applink.c at: $($applink.FullName)"
+          Write-Host "Using OpenSSL root: $opensslRoot"
+
+          "openssl_root=$opensslRoot" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
       - name: Build
         shell: pwsh
         run: |
@@ -28,7 +48,11 @@ jobs:
           New-Item -ItemType Directory -Path bld | Out-Null
           Set-Location bld
 
-          & "C:\Program Files\CMake\bin\cmake.exe" -G "Visual Studio 17 2022" -DWITH_BOOST=C:\boost ..
+          & "C:\Program Files\CMake\bin\cmake.exe" -G "Visual Studio 17 2022" `
+            -DWITH_BOOST=C:\boost `
+            -DWITH_SSL="${{ steps.openssl.outputs.openssl_root }}" `
+            ..
+
           & "C:\Program Files\CMake\bin\cmake.exe" --build . -- /m
 
       - name: Create package
@@ -38,7 +62,11 @@ jobs:
 
           Set-Location bld
 
-          & "C:\Program Files\CMake\bin\cmake.exe" -G "Visual Studio 17" -DWITH_BOOST=C:\boost ..
+          & "C:\Program Files\CMake\bin\cmake.exe" -G "Visual Studio 17 2022" `
+            -DWITH_BOOST=C:\boost `
+            -DWITH_SSL="${{ steps.openssl.outputs.openssl_root }}" `
+            ..
+
           & "C:\Program Files\CMake\bin\cmake.exe" --build . --target package -- /m
 
       - name: Run MTR
