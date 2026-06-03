@@ -1,0 +1,90 @@
+name: Build and test mysql-server on windows 
+
+on:
+  pull_request:
+    branches: [ "trunk" ]
+
+jobs:
+  windows-build:
+    runs-on: windows-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Git setup
+        shell: pwsh
+        run: git config --system core.longpaths true
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          if (Test-Path bld) { Remove-Item -Recurse -Force bld }
+          New-Item -ItemType Directory -Path bld | Out-Null
+          Set-Location bld
+
+          & "C:\Program Files\CMake\bin\cmake.exe" -G "Visual Studio 17 2022" -DWITH_BOOST=C:\boost ..
+          & "C:\Program Files\CMake\bin\cmake.exe" --build . -- /m
+
+      - name: Create package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          Set-Location bld
+
+          & "C:\Program Files\CMake\bin\cmake.exe" -G "Visual Studio 17" -DWITH_BOOST=C:\boost ..
+          & "C:\Program Files\CMake\bin\cmake.exe" --build . --target package -- /m
+
+      - name: Run MTR
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $mysqlTestDir = Join-Path $env:GITHUB_WORKSPACE 'bld\mysql-test'
+          $summaryReport = Join-Path $env:GITHUB_WORKSPACE ("mtr-{0}.txt" -f $env:GITHUB_RUN_NUMBER)
+          $xmlReport = Join-Path $env:GITHUB_WORKSPACE 'mtr.xml'
+          $vardir = Join-Path $env:RUNNER_TEMP 'var-dir'
+
+          if (-not (Test-Path $mysqlTestDir)) {
+            New-Item -ItemType File -Path $xmlReport -Force | Out-Null
+            Set-Content -Path $summaryReport -Value 'skipped'
+            return
+          }
+
+          if (Test-Path $vardir) {
+            Remove-Item -Recurse -Force $vardir
+          }
+          New-Item -ItemType Directory -Path $vardir | Out-Null
+
+          Set-Location $mysqlTestDir
+
+          perl mysql-test-run.pl `
+            --vardir="$vardir" `
+            --force `
+            --retry-failure=2 `
+            --retry=2 `
+            --max-test-fail=0 `
+            --report-unstable-tests `
+            --clean-vardir `
+            --xml-report="$xmlReport" `
+            --parallel=$env:NUMBER_OF_PROCESSORS `
+            --summary-report="$summaryReport"
+
+      - name: Cleanup
+        if: always()
+        shell: pwsh
+        run: |
+          if (Test-Path bld) {
+            Remove-Item -Recurse -Force bld
+          }
+
+          if (Test-Path mtr.xml) {
+            Remove-Item -Force mtr.xml
+          }
