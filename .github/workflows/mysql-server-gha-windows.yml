@@ -40,15 +40,15 @@ jobs:
           & "$($opensslDir.FullName)\bin\openssl.exe" version
 
           "openssl_root=$opensslRoot" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-
+      
       - name: Install Bison
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           choco install winflexbison3 -y --no-progress
-          where bison
-          bison --version          
-
+          where.exe win_bison
+          win_bison --version  
+          
       - name: Build
         shell: pwsh
         run: |
@@ -61,7 +61,8 @@ jobs:
           & "C:\Program Files\CMake\bin\cmake.exe" `
             -G "Visual Studio 17 2022" `
             -DWITH_BOOST=C:/boost `
-            -DWITH_SSL="${{ steps.openssl.outputs.openssl_root }}" `
+            -DWITH_SSL="C:/Program Files/OpenSSL" `
+            -DBISON_EXECUTABLE=C:/ProgramData/chocolatey/bin/win_bison.exe `
             ..
 
           & "C:\Program Files\CMake\bin\cmake.exe" --build . -- /m
@@ -76,7 +77,8 @@ jobs:
           & "C:\Program Files\CMake\bin\cmake.exe" `
             -G "Visual Studio 17 2022" `
             -DWITH_BOOST=C:/boost `
-            -DWITH_SSL="${{ steps.openssl.outputs.openssl_root }}" `
+            -DWITH_SSL="${{ steps.openssl.outputs.openssl_root }}"
+            -DBISON_EXECUTABLE=C:/ProgramData/chocolatey/bin/win_bison.exe `
             ..
 
           & "C:\Program Files\CMake\bin\cmake.exe" --build . --target package -- /m
