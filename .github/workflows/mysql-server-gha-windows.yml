@@ -40,7 +40,15 @@ jobs:
           & "$($opensslDir.FullName)\bin\openssl.exe" version
 
           "openssl_root=$opensslRoot" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-          
+
+      - name: Install Bison
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          choco install winflexbison3 -y --no-progress
+          where bison
+          bison --version          
+
       - name: Build
         shell: pwsh
         run: |
