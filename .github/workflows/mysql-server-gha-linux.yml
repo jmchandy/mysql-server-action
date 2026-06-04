@@ -298,3 +298,47 @@ jobs:
             [ -e "$f" ] || continue
             xmllint --noout "$f"
           done
+
+      - name: Organize artifacts
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          rm -rf artifacts
+          mkdir -p \
+            artifacts/test-reports \
+            artifacts/summaries \
+            artifacts/logs \
+            artifacts/packages
+
+          shopt -s nullglob
+
+          cp -v mtr-*.xml artifacts/test-reports/ 2>/dev/null || true
+          cp -v mtr-unit-*.xml artifacts/test-reports/ 2>/dev/null || true
+          cp -v mtr-replication.xml artifacts/test-reports/ 2>/dev/null || true
+          cp -v mtr-debug.xml artifacts/test-reports/ 2>/dev/null || true
+
+          cp -v build-error_*.txt artifacts/summaries/ 2>/dev/null || true
+          cp -v build-error_debug_*.txt artifacts/summaries/ 2>/dev/null || true
+          cp -v build-error_replication_*.txt artifacts/summaries/ 2>/dev/null || true
+          cp -v extra_suites_*.txt artifacts/summaries/ 2>/dev/null || true
+          cp -v hypergraph_*.txt artifacts/summaries/ 2>/dev/null || true
+
+          cp -v mtr.err artifacts/logs/ 2>/dev/null || true
+
+          cp -v bld/*.tar.gz artifacts/packages/ 2>/dev/null || true
+          cp -v bld/*.tgz artifacts/packages/ 2>/dev/null || true
+          cp -v bld/*.zip artifacts/packages/ 2>/dev/null || true
+          cp -v bld/*.rpm artifacts/packages/ 2>/dev/null || true
+          cp -v bld/*.deb artifacts/packages/ 2>/dev/null || true
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mysql-ci-artifacts
+          if-no-files-found: ignore
+          path: artifacts/
+
+          
