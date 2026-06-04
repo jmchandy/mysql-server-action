@@ -19,6 +19,39 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Analyze changed files
+        id: diff
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $baseSha = '${{ github.event.pull_request.base.sha }}'
+          $headSha = '${{ github.event.pull_request.head.sha }}'
+
+          $changedFiles = @(git diff --name-only $baseSha $headSha | Where-Object { $_ -and $_.Trim() })
+
+          Write-Host '================================='
+          Write-Host 'Changed files detected in PR:'
+          Write-Host '================================='
+
+          if ($changedFiles.Count -eq 0) {
+            Write-Host '(none)'
+          } else {
+            $changedFiles | ForEach-Object { Write-Host $_ }
+          }
+
+          Write-Host '================================='
+
+          $hasInnodbChanges = $false
+
+          if ($changedFiles.Count -gt 0) {
+            if ($changedFiles | Where-Object { $_ -match '(^|/)(innodb|innobase)(/|$)' }) {
+              $hasInnodbChanges = $true
+            }
+          }
+
+          "has_innodb_changes=$hasInnodbChanges" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
       - name: Install OpenSSL
         id: openssl
         shell: pwsh
@@ -89,12 +122,6 @@ jobs:
           $xmlReport = Join-Path $env:GITHUB_WORKSPACE 'mtr.xml'
           $vardir = Join-Path $env:RUNNER_TEMP 'var-dir'
 
-          if (-not (Test-Path $mysqlTestDir)) {
-            New-Item -ItemType File -Path $xmlReport -Force | Out-Null
-            Set-Content -Path $summaryReport -Value 'skipped'
-            return
-          }
-
           if (Test-Path $vardir) {
             Remove-Item -Recurse -Force $vardir
           }
@@ -102,17 +129,34 @@ jobs:
 
           Set-Location $mysqlTestDir
 
-          perl mysql-test-run.pl `
-            --vardir="$vardir" `
-            --force `
-            --retry-failure=2 `
-            --retry=2 `
-            --max-test-fail=0 `
-            --report-unstable-tests `
-            --clean-vardir `
-            --xml-report="$xmlReport" `
-            --parallel=$env:NUMBER_OF_PROCESSORS `
-            --summary-report="$summaryReport"
+          if ("${{ steps.diff.outputs.has_innodb_changes }}" -eq "true") {
+            perl mysql-test-run.pl `
+              --vardir="$vardir" `
+              --force `
+              --retry-failure=2 `
+              --retry=2 `
+              --max-test-fail=0 `
+              --report-unstable-tests `
+              --clean-vardir `
+              --xml-report="$xmlReport" `
+              --parallel=$env:NUMBER_OF_PROCESSORS `
+              --suite=innodb `
+              --summary-report="$summaryReport"
+          }
+          else {
+            perl mysql-test-run.pl `
+              --vardir="$vardir" `
+              --force `
+              --retry-failure=2 `
+              --retry=2 `
+              --max-test-fail=0 `
+              --report-unstable-tests `
+              --clean-vardir `
+              --xml-report="$xmlReport" `
+              --parallel=$env:NUMBER_OF_PROCESSORS `
+              --summary-report="$summaryReport" `
+              1st
+          }
 
       - name: Cleanup
         if: always()
