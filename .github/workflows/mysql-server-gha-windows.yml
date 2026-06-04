@@ -58,14 +58,17 @@ jobs:
           New-Item -ItemType Directory -Path bld | Out-Null
           Set-Location bld
 
-          & "C:\Program Files\CMake\bin\cmake.exe" `
-            -G "Visual Studio 17 2022" `
-            -DWITH_BOOST=C:/boost `
-            -DWITH_SSL="C:/Program Files/OpenSSL" `
-            -DBISON_EXECUTABLE=C:/ProgramData/chocolatey/bin/win_bison.exe `
-            ..
+          $cmake = 'C:\Program Files\CMake\bin\cmake.exe'
+          $args = @(
+            '-G', 'Visual Studio 17 2022'
+            '-DWITH_BOOST=C:/boost'
+            '-DWITH_SSL=C:/Program Files/OpenSSL'
+            '-DBISON_EXECUTABLE=C:/ProgramData/chocolatey/bin/win_bison.exe'
+            '..'
+          )
 
-          & "C:\Program Files\CMake\bin\cmake.exe" --build . -- /m
+          & $cmake @args
+          & $cmake --build . -- /m
           
       - name: Create package
         shell: pwsh
@@ -73,15 +76,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
 
           Set-Location bld
-
-          & "C:\Program Files\CMake\bin\cmake.exe" `
-            -G "Visual Studio 17 2022" `
-            -DWITH_BOOST=C:/boost `
-            -DWITH_SSL="${{ steps.openssl.outputs.openssl_root }}"
-            -DBISON_EXECUTABLE=C:/ProgramData/chocolatey/bin/win_bison.exe `
-            ..
-
-          & "C:\Program Files\CMake\bin\cmake.exe" --build . --target package -- /m
+          & 'C:\Program Files\CMake\bin\cmake.exe' --build . --target package -- /m
 
       - name: Run MTR
         shell: pwsh
