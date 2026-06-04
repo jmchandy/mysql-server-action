@@ -44,7 +44,7 @@ jobs:
             libicu-dev \
             libedit-dev \
             libtirpc-dev \
-            xmllint
+            libxml2-utils
           
 
       - name: Analyze changed files
