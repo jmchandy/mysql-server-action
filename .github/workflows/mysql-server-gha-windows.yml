@@ -81,6 +81,11 @@ jobs:
           choco install winflexbison3 -y --no-progress
           where.exe win_bison
           win_bison --version  
+
+      - name: Install ImDisk
+        shell: pwsh
+        run: |
+          choco install imdisk -y --no-progress
           
       - name: Build
         shell: pwsh
@@ -111,52 +116,39 @@ jobs:
           Set-Location bld
           & 'C:\Program Files\CMake\bin\cmake.exe' --build . --target package -- /m
 
+      - name: Prepare RAM disk for MTR
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          if (Test-Path 'M:\') {
+            Write-Host "M: already exists"
+          } else {
+            imdisk -a -s 40G -p "/fs:ntfs /q /y" -o awe -m M:
+          }
+
+          New-Item -ItemType Directory -Path 'M:\var-dir' -Force | Out-Null
+
       - name: Run MTR
         shell: pwsh
         continue-on-error: true
         run: |
           $ErrorActionPreference = 'Stop'
 
-          $mysqlTestDir = Join-Path $env:GITHUB_WORKSPACE 'bld\mysql-test'
-          $summaryReport = Join-Path $env:GITHUB_WORKSPACE ("mtr-{0}.txt" -f $env:GITHUB_RUN_NUMBER)
-          $xmlReport = Join-Path $env:GITHUB_WORKSPACE 'mtr.xml'
-          $vardir = Join-Path $env:RUNNER_TEMP 'var-dir'
+          Set-Location (Join-Path $env:GITHUB_WORKSPACE 'bld\mysql-test')
 
-          if (Test-Path $vardir) {
-            Remove-Item -Recurse -Force $vardir
-          }
-          New-Item -ItemType Directory -Path $vardir | Out-Null
-
-          Set-Location $mysqlTestDir
-
-          if ("${{ steps.diff.outputs.has_innodb_changes }}" -eq "true") {
-            perl mysql-test-run.pl `
-              --vardir="$vardir" `
-              --force `
-              --retry-failure=2 `
-              --retry=2 `
-              --max-test-fail=0 `
-              --report-unstable-tests `
-              --clean-vardir `
-              --xml-report="$xmlReport" `
-              --parallel=$env:NUMBER_OF_PROCESSORS `
-              --suite=innodb `
-              --summary-report="$summaryReport"
-          }
-          else {
-            perl mysql-test-run.pl `
-              --vardir="$vardir" `
-              --force `
-              --retry-failure=2 `
-              --retry=2 `
-              --max-test-fail=0 `
-              --report-unstable-tests `
-              --clean-vardir `
-              --xml-report="$xmlReport" `
-              --parallel=$env:NUMBER_OF_PROCESSORS `
-              --summary-report="$summaryReport" `
-              1st
-          }
+          perl mysql-test-run.pl `
+            --vardir=M:/var-dir `
+            --force `
+            --retry-failure=2 `
+            --retry=2 `
+            --max-test-fail=0 `
+            --report-unstable-tests `
+            --clean-vardir `
+            --xml-report="$(Join-Path $env:GITHUB_WORKSPACE 'mtr.xml')" `
+            --summary-report="$(Join-Path $env:GITHUB_WORKSPACE ("mtr-{0}.txt" -f $env:GITHUB_RUN_NUMBER))" `
+            --parallel=$env:NUMBER_OF_PROCESSORS `
+            1st
 
       - name: Upload MTR failure logs
         if: always()
@@ -165,8 +157,8 @@ jobs:
           name: windows-mtr-logs
           if-no-files-found: ignore
           path: |
-            D:/a/_temp/var-dir/log/**/*.reject
-            D:/a/_temp/var-dir/log/**/*.log
+            M:/var-dir/log/**/*.reject
+            M:/var-dir/log/**/*.log
 
       - name: Cleanup
         if: always()
