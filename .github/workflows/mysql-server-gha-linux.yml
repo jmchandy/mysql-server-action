@@ -18,34 +18,22 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-
           sudo apt-get install -y \
             build-essential \
             cmake \
             ninja-build \
-            bison \
-            flex \
-            pkg-config \
-            libssl-dev \
             libaio-dev \
-            libncurses-dev \
-            libtirpc-dev \
-            rpcsvc-proto \
-            libsasl2-dev \
-            libldap2-dev \
-            libudev-dev \
             libcurl4-openssl-dev \
-            libevent-dev \
-            libprotobuf-dev \
-            protobuf-compiler \
-            liblz4-dev \
-            zlib1g-dev \
-            libreadline-dev \
-            libicu-dev \
             libedit-dev \
+            libevent-dev \
+            libldap2-dev \
+            libprotobuf-dev \
+            libreadline-dev \
+            libsasl2-dev \
             libtirpc-dev \
-            libxml2-utils
-          
+            libudev-dev \
+            libxml2-utils \
+            protobuf-compiler
 
       - name: Analyze changed files
         id: diff
