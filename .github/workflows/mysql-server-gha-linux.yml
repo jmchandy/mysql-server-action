@@ -1,16 +1,12 @@
-name: Build and test PRs in mysql-server trunk branch on Oracle Linux
+name: Build and test PRs in mysql-server trunk branch on Ubuntu
 
 on:
   pull_request:
-    branches: [ "trunk" ] 
- 
-jobs:  
-  linux-build:
-    runs-on: 
-       - self-hosted
-       - Linux
-       - X64
+    branches: [ "trunk" ]
 
+jobs:
+  linux-build:
+    runs-on: ubuntu-latest
     timeout-minutes: 360
 
     steps:
@@ -18,6 +14,38 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+
+          sudo apt-get install -y \
+            build-essential \
+            cmake \
+            ninja-build \
+            bison \
+            flex \
+            pkg-config \
+            libssl-dev \
+            libaio-dev \
+            libncurses-dev \
+            libtirpc-dev \
+            rpcsvc-proto \
+            libsasl2-dev \
+            libldap2-dev \
+            libudev-dev \
+            libcurl4-openssl-dev \
+            libevent-dev \
+            libprotobuf-dev \
+            protobuf-compiler \
+            liblz4-dev \
+            zlib1g-dev \
+            libreadline-dev \
+            libicu-dev \
+            libedit-dev \
+            libtirpc-dev \
+            xmllint
+          
 
       - name: Analyze changed files
         id: diff
@@ -32,42 +60,34 @@ jobs:
             git diff --name-only "$base_sha" "$head_sha" | sed '/^$/d'
           )
 
-          doxygen_skip_re='^(internal/cloud/(rapid/.*|mysql-test/suite/rapid.*|mysql-test/[^/]*$|components/vector_store_load/.*))$'
+          echo "================================="
+          echo "Changed files detected in PR:"
+          echo "================================="
+
+          if (( ${#changed_files[@]} == 0 )); then
+            echo "(none)"
+          else
+            printf '%s\n' "${changed_files[@]}"
+          fi
+
+          echo "================================="
+
           hypergraph_re='(hypergraph|sql/join_optimizer.*|sql/iterators.*|sql/range_optimizer.*|sql/sql_.*|sql/query_.*|sql/opt_.*|sql/window.*|sql/item.*|sql/handler.*|sql/histogram/.*)'
           innodb_re='^(storage/innobase/|mysql-test/suite/innodb)'
 
-          skip_doxygen=false
           enable_hypergraph=false
           build_debug_tree=false
-          enable_rapid=true
-          enable_router=false
           enable_ndb=false
-          enable_airglow=false
-          enable_mle=false
           enable_extra_mtr=false
           extra_mtr_mysql_test_dir="bld/mysql-test"
 
           if (( ${#changed_files[@]} > 0 )); then
-            if printf '%s\n' "${changed_files[@]}" | grep -Eqv "$doxygen_skip_re"; then
-              skip_doxygen=false
-            else
-              skip_doxygen=true
-            fi
-
             if printf '%s\n' "${changed_files[@]}" | grep -Eq "$hypergraph_re"; then
               enable_hypergraph=true
             fi
 
             if printf '%s\n' "${changed_files[@]}" | grep -Eq "$innodb_re"; then
               build_debug_tree=true
-            fi
-
-            if printf '%s\n' "${changed_files[@]}" | grep -Eq '^internal/cloud/rapid/'; then
-              enable_rapid=true
-            fi
-
-            if printf '%s\n' "${changed_files[@]}" | grep -Eq '^router/'; then
-              enable_router=true
             fi
 
             if printf '%s\n' "${changed_files[@]}" | grep -Eq '^(storage/ndb/|sql/dd/ndbinfo|mysql-test/suite/.*ndb)'; then
@@ -80,120 +100,48 @@ jobs:
             fi
           fi
 
-          [[ -d internal/cloud/plugin/airglow ]] && enable_airglow=true
-          [[ -d internal/components/mle ]] && enable_mle=true
-
           {
-            echo "skip_doxygen=$skip_doxygen"
             echo "enable_hypergraph=$enable_hypergraph"
             echo "build_debug_tree=$build_debug_tree"
-            echo "enable_rapid=$enable_rapid"
-            echo "enable_router=$enable_router"
             echo "enable_ndb=$enable_ndb"
-            echo "enable_airglow=$enable_airglow"
-            echo "enable_mle=$enable_mle"
             echo "enable_extra_mtr=$enable_extra_mtr"
             echo "extra_mtr_mysql_test_dir=$extra_mtr_mysql_test_dir"
-          } >> "$GITHUB_OUTPUT"          
-
-      - name: Doxygen
-        if: steps.diff.outputs.skip_doxygen != 'true' && hashFiles('Doxyfile.in') != ''
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          export WITH_BOOST=/usr/global/share
-          export PLANTUML_JAR_PATH=/usr/global/share/java/plantuml/plantuml.8053.jar
-
-          rm -rf build-doxygen
-          mkdir -p build-doxygen
-          cd build-doxygen
-
-          cmake ..
-          make doxygen
-
-          if [ -s tofix-regressions.log ]; then
-            truncate --size='<15000' tofix-regressions.log
-            exit 1
-          fi
+          } >> "$GITHUB_OUTPUT"
 
       - name: Build
         shell: bash
         run: |
-            set -euo pipefail
+          set -euo pipefail
 
-            BUILD_OPTS=""
+          BUILD_OPTS=""
 
-            if [[ "${{ steps.diff.outputs.enable_rapid }}" == "true" ]]; then
-              BUILD_OPTS="$BUILD_OPTS -DWITH_RAPID=1"
-            fi
+          if [[ "${{ steps.diff.outputs.enable_ndb }}" == "true" ]]; then
+            BUILD_OPTS="$BUILD_OPTS -DWITH_NDBCLUSTER=1"
+          fi
 
-            if [[ "${{ steps.diff.outputs.enable_router }}" == "true" ]]; then
-              JIT_EXECUTOR_BRANCH="jit-executor-23.0.2-mrs"
-              JIT_EXECUTOR_PRODUCT="jit-executor_binary_commercial_el8-x86-64bit_zip"
-              JIT_EXECUTOR_LOCATION="${GITHUB_WORKSPACE}/jit-executor-lib"
-              JIT_EXECUTOR_ZIP="$(mktemp)"
+          if [[ "${{ steps.diff.outputs.enable_hypergraph }}" == "true" ]]; then
+            BUILD_OPTS="$BUILD_OPTS -DWITH_HYPERGRAPH_OPTIMIZER=ON"
+          fi
 
-              JIT_EXECUTOR_URL=$(
-                curl --retry 10 -sS \
-                  "https://pb2.mysql.oraclecorp.com/api/v1/branches/${JIT_EXECUTOR_BRANCH}/builds?limit=1&product=${JIT_EXECUTOR_PRODUCT}" \
-                | jq '.[0]' \
-                | jq -r '.builds[0].artifacts[0].url'
-              )
+          rm -rf "${GITHUB_WORKSPACE}/bld" "${GITHUB_WORKSPACE}/debug"
+          mkdir -p bld
+          cd bld
 
-              curl --retry 10 -sS "$JIT_EXECUTOR_URL" --output "$JIT_EXECUTOR_ZIP"
-              unzip -qq -o -d "$JIT_EXECUTOR_LOCATION" -j "$JIT_EXECUTOR_ZIP"
-              rm -f "$JIT_EXECUTOR_ZIP"
+          echo "cmake .. $BUILD_OPTS"
+          cmake .. $BUILD_OPTS
+          make -j"$(nproc)"
 
-              if [[ ! -f "${JIT_EXECUTOR_LOCATION}/libjitexecutor.so" ]]; then
-                echo "Failed to download the JIT executor library"
-                exit 1
-              fi
+          if [[ "${{ steps.diff.outputs.build_debug_tree }}" == "true" ]]; then
+            cd "${GITHUB_WORKSPACE}"
+            mkdir -p debug
+            cd debug
 
-              BUILD_OPTS="$BUILD_OPTS -DWITH_ROUTER=1 -DMRS_JIT_EXECUTOR_LIB=${JIT_EXECUTOR_LOCATION}"
-            else
-              BUILD_OPTS="$BUILD_OPTS -DWITH_ROUTER=0"
-            fi
-
-            if [[ "${{ steps.diff.outputs.enable_ndb }}" == "true" ]]; then
-              BUILD_OPTS="$BUILD_OPTS -DWITH_NDBCLUSTER=1"
-            fi
-
-            if [[ "${{ steps.diff.outputs.enable_hypergraph }}" == "true" ]]; then
-              BUILD_OPTS="$BUILD_OPTS -DWITH_HYPERGRAPH_OPTIMIZER=ON"
-            fi
-
-            if [[ "${{ steps.diff.outputs.enable_airglow }}" == "true" ]]; then
-              BUILD_OPTS="$BUILD_OPTS -DWITH_AIRGLOW=1 -DWITH_LOGSVC=0"
-            fi
-
-            if [[ "${{ steps.diff.outputs.enable_mle }}" == "true" ]]; then
-              BUILD_OPTS="$BUILD_OPTS -DWITH_MLE=1"
-            fi
-
-            export PATH=/usr/lib/ccache:$PATH
-            export WITH_GMOCK=/usr/global/share
-            export WITH_BOOST=/usr/global/share
-
-            rm -rf "${GITHUB_WORKSPACE}/bld" "${GITHUB_WORKSPACE}/debug"
-            mkdir -p bld
-            cd bld
-
-            echo "cmake .. $BUILD_OPTS"
-            cmake .. $BUILD_OPTS
+            DEBUG_OPTS="-DWITH_DEBUG=1 -DOPTIMIZE_DEBUG_BUILDS=1 $BUILD_OPTS"
+            echo "cmake .. $DEBUG_OPTS"
+            cmake .. $DEBUG_OPTS
             make -j"$(nproc)"
+          fi
 
-            if [[ "${{ steps.diff.outputs.build_debug_tree }}" == "true" ]]; then
-              cd "${GITHUB_WORKSPACE}"
-              mkdir -p debug
-              cd debug
-
-              DEBUG_OPTS="-DWITH_DEBUG=1 -DOPTIMIZE_DEBUG_BUILDS=1 $BUILD_OPTS"
-              echo "cmake .. $DEBUG_OPTS"
-              cmake .. $DEBUG_OPTS
-              make -j"$(nproc)"
-            fi
-        
       - name: Create package
         shell: bash
         run: |
@@ -235,7 +183,7 @@ jobs:
           UNIT_STATUS=$?
 
           exit $((MTR_STATUS + UNIT_STATUS))
-          
+
       - name: Hypergraph MTR
         if: steps.diff.outputs.enable_hypergraph == 'true'
         shell: bash
@@ -262,7 +210,7 @@ jobs:
             --summary-report="${HYPERGRAPH_REPORT}" \
             --hypergraph \
             --skip-ndb \
-            --skip-suite=rapid    
+            --skip-suite=rapid
 
       - name: Extra MTR suites
         if: steps.diff.outputs.enable_extra_mtr == 'true'
@@ -290,7 +238,7 @@ jobs:
             --parallel "$(nproc)" \
             --summary-report="${extra_report}" \
             --suite="$(IFS=,; echo "${extra_suites[*]}")"
-            
+
       - name: Debug
         shell: bash
         continue-on-error: true
@@ -323,7 +271,7 @@ jobs:
             --summary-report="${DEBUG_SUMMARY_REPORT}" \
             --parallel "$(nproc)" \
             2>&1 | tee "${DEBUG_ERR_LOG}"
-            
+
       - name: MTR Replication Testing
         shell: bash
         continue-on-error: true
@@ -362,4 +310,3 @@ jobs:
             [ -e "$f" ] || continue
             xmllint --noout "$f"
           done
-            
