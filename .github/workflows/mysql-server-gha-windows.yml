@@ -132,34 +132,18 @@ jobs:
 
           Set-Location $mysqlTestDir
 
-          if ("${{ steps.diff.outputs.has_innodb_changes }}" -eq "true") {
-            perl mysql-test-run.pl `
-              --vardir="$vardir" `
-              --force `
-              --retry-failure=2 `
-              --retry=2 `
-              --max-test-fail=0 `
-              --report-unstable-tests `
-              --clean-vardir `
-              --xml-report="$xmlReport" `
-              --summary-report="$summaryReport" `
-              --parallel=$env:NUMBER_OF_PROCESSORS `
-              --suite=innodb
-          }
-          else {
-            perl mysql-test-run.pl `
-              --vardir="$vardir" `
-              --force `
-              --retry-failure=2 `
-              --retry=2 `
-              --max-test-fail=0 `
-              --report-unstable-tests `
-              --clean-vardir `
-              --xml-report="$xmlReport" `
-              --summary-report="$summaryReport" `
-              --parallel=$env:NUMBER_OF_PROCESSORS `
-              1st
-          }
+          perl mysql-test-run.pl `
+            --vardir="$vardir" `
+            --force `
+            --retry-failure=2 `
+            --retry=2 `
+            --max-test-fail=0 `
+            --report-unstable-tests `
+            --clean-vardir `
+            --xml-report="$xmlReport" `
+            --summary-report="$summaryReport" `
+            --parallel=$env:NUMBER_OF_PROCESSORS `
+            --suite=innodb
 
       - name: Upload MTR failure logs
         if: always()
