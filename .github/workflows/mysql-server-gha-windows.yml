@@ -1,4 +1,4 @@
-name: Build and test mysql-server on windows 
+name: Build and test mysql-server on windows
 
 on:
   pull_request:
@@ -12,7 +12,10 @@ jobs:
     steps:
       - name: Git setup
         shell: pwsh
-        run: git config --system core.longpaths true
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.eol lf
+          git config --system core.longpaths true
 
       - name: Checkout
         uses: actions/checkout@v4
@@ -73,20 +76,15 @@ jobs:
           & "$($opensslDir.FullName)\bin\openssl.exe" version
 
           "openssl_root=$opensslRoot" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-      
+
       - name: Install Bison
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           choco install winflexbison3 -y --no-progress
           where.exe win_bison
-          win_bison --version  
+          win_bison --version
 
-      - name: Install ImDisk
-        shell: pwsh
-        run: |
-          choco install imdisk -y --no-progress
-          
       - name: Build
         shell: pwsh
         run: |
@@ -100,14 +98,14 @@ jobs:
           $args = @(
             '-G', 'Visual Studio 17 2022'
             '-DWITH_BOOST=C:/boost'
-            '-DWITH_SSL=C:/Program Files/OpenSSL'
+            '-DWITH_SSL=${{ steps.openssl.outputs.openssl_root }}'
             '-DBISON_EXECUTABLE=C:/ProgramData/chocolatey/bin/win_bison.exe'
             '..'
           )
 
           & $cmake @args
           & $cmake --build . -- /m
-          
+
       - name: Create package
         shell: pwsh
         run: |
@@ -116,39 +114,52 @@ jobs:
           Set-Location bld
           & 'C:\Program Files\CMake\bin\cmake.exe' --build . --target package -- /m
 
-      - name: Prepare RAM disk for MTR
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-
-          if (Test-Path 'M:\') {
-            Write-Host "M: already exists"
-          } else {
-            imdisk -a -s 40G -p "/fs:ntfs /q /y" -o awe -m M:
-          }
-
-          New-Item -ItemType Directory -Path 'M:\var-dir' -Force | Out-Null
-
       - name: Run MTR
         shell: pwsh
         continue-on-error: true
         run: |
           $ErrorActionPreference = 'Stop'
 
-          Set-Location (Join-Path $env:GITHUB_WORKSPACE 'bld\mysql-test')
+          $mysqlTestDir = Join-Path $env:GITHUB_WORKSPACE 'bld\mysql-test'
+          $vardir = Join-Path $env:RUNNER_TEMP 'var-dir'
+          $summaryReport = Join-Path $env:GITHUB_WORKSPACE ("mtr-{0}.txt" -f $env:GITHUB_RUN_NUMBER)
+          $xmlReport = Join-Path $env:GITHUB_WORKSPACE 'mtr.xml'
 
-          perl mysql-test-run.pl `
-            --vardir=M:/var-dir `
-            --force `
-            --retry-failure=2 `
-            --retry=2 `
-            --max-test-fail=0 `
-            --report-unstable-tests `
-            --clean-vardir `
-            --xml-report="$(Join-Path $env:GITHUB_WORKSPACE 'mtr.xml')" `
-            --summary-report="$(Join-Path $env:GITHUB_WORKSPACE ("mtr-{0}.txt" -f $env:GITHUB_RUN_NUMBER))" `
-            --parallel=$env:NUMBER_OF_PROCESSORS `
-            1st
+          if (Test-Path $vardir) {
+            Remove-Item -Recurse -Force $vardir
+          }
+          New-Item -ItemType Directory -Path $vardir | Out-Null
+
+          Set-Location $mysqlTestDir
+
+          if ("${{ steps.diff.outputs.has_innodb_changes }}" -eq "true") {
+            perl mysql-test-run.pl `
+              --vardir="$vardir" `
+              --force `
+              --retry-failure=2 `
+              --retry=2 `
+              --max-test-fail=0 `
+              --report-unstable-tests `
+              --clean-vardir `
+              --xml-report="$xmlReport" `
+              --summary-report="$summaryReport" `
+              --parallel=$env:NUMBER_OF_PROCESSORS `
+              --suite=innodb
+          }
+          else {
+            perl mysql-test-run.pl `
+              --vardir="$vardir" `
+              --force `
+              --retry-failure=2 `
+              --retry=2 `
+              --max-test-fail=0 `
+              --report-unstable-tests `
+              --clean-vardir `
+              --xml-report="$xmlReport" `
+              --summary-report="$summaryReport" `
+              --parallel=$env:NUMBER_OF_PROCESSORS `
+              1st
+          }
 
       - name: Upload MTR failure logs
         if: always()
@@ -157,8 +168,8 @@ jobs:
           name: windows-mtr-logs
           if-no-files-found: ignore
           path: |
-            M:/var-dir/log/**/*.reject
-            M:/var-dir/log/**/*.log
+            ${{ runner.temp }}\var-dir\log\**\*.reject
+            ${{ runner.temp }}\var-dir\log\**\*.log
 
       - name: Cleanup
         if: always()
