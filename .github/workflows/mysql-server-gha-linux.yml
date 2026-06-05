@@ -160,7 +160,7 @@ jobs:
 
           cd "${MYSQL_TEST_DIR}"
           perl mysql-test-run.pl \
-            --nounit-tests --force --mem --retry-failure=2 --retry=2 --max-test-fail=0 \
+            --nounit-tests --force --mem --retry-failure=2 --retry=2 \
             --report-unstable-tests --clean-vardir --parallel "$(nproc)" \
             --xml-report="${XML_REPORT}" \
             --summary-report="${SUMMARY_REPORT}"
@@ -191,7 +191,6 @@ jobs:
             --mem \
             --retry-failure=2 \
             --retry=2 \
-            --max-test-fail=0 \
             --report-unstable-tests \
             --clean-vardir \
             --parallel "$(nproc)" \
@@ -220,7 +219,6 @@ jobs:
             --mem \
             --retry-failure=2 \
             --retry=2 \
-            --max-test-fail=0 \
             --report-unstable-tests \
             --clean-vardir \
             --parallel "$(nproc)" \
@@ -252,7 +250,6 @@ jobs:
             --mem \
             --retry-failure=2 \
             --retry=2 \
-            --max-test-fail=0 \
             --report-unstable-tests \
             --clean-vardir \
             --xml-report="${DEBUG_XML_REPORT}" \
@@ -277,7 +274,6 @@ jobs:
             --mem \
             --retry-failure=2 \
             --retry=2 \
-            --max-test-fail=0 \
             --report-unstable-tests \
             --clean-vardir \
             --xml-report="${REPL_REPORT}" \
