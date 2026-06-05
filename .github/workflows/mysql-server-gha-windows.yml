@@ -45,6 +45,7 @@ jobs:
             }
           }
           "has_innodb_changes=$hasInnodbChanges" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          
       - name: Install OpenSSL
         id: openssl
         shell: pwsh
@@ -60,6 +61,7 @@ jobs:
           Write-Host "Using OpenSSL root: $opensslRoot"
           & "$($opensslDir.FullName)\bin\openssl.exe" version
           "openssl_root=$opensslRoot" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          
       - name: Install Bison
         shell: pwsh
         run: |
@@ -67,6 +69,7 @@ jobs:
           choco install winflexbison3 -y --no-progress
           where.exe win_bison
           win_bison --version
+          
       - name: Build
         shell: pwsh
         run: |
@@ -84,12 +87,14 @@ jobs:
           )
           & $cmake @args
           & $cmake --build . -- /m
+          
       - name: Create package
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           Set-Location bld
           & 'C:\Program Files\CMake\bin\cmake.exe' --build . --target package -- /m
+          
       - name: Run MTR
         shell: pwsh
         continue-on-error: true
@@ -104,32 +109,17 @@ jobs:
           }
           New-Item -ItemType Directory -Path $vardir | Out-Null
           Set-Location $mysqlTestDir
-          if ("${{ steps.diff.outputs.has_innodb_changes }}" -eq "true") {
-            perl mysql-test-run.pl `
-              --vardir="$vardir" `
-              --force `
-              --retry-failure=2 `
-              --retry=2 `
-              --report-unstable-tests `
-              --clean-vardir `
-              --xml-report="$xmlReport" `
-              --summary-report="$summaryReport" `
-              --parallel=$env:NUMBER_OF_PROCESSORS `
-              --suite=innodb
-          }
-          else {
-            perl mysql-test-run.pl `
-              --vardir="$vardir" `
-              --force `
-              --retry-failure=2 `
-              --retry=2 `
-              --report-unstable-tests `
-              --clean-vardir `
-              --xml-report="$xmlReport" `
-              --summary-report="$summaryReport" `
-              --parallel=$env:NUMBER_OF_PROCESSORS `
-              1st
-          }
+          perl mysql-test-run.pl `
+            --vardir="$vardir" `
+            --force `
+            --retry-failure=2 `
+            --retry=2 `
+            --report-unstable-tests `
+            --clean-vardir `
+            --xml-report="$xmlReport" `
+            --summary-report="$summaryReport" `
+            --parallel=$env:NUMBER_OF_PROCESSORS `
+            --suite=innodb
           
       - name: Organize artifacts
         if: always()
