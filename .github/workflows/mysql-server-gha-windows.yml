@@ -43,7 +43,7 @@ jobs:
             $changedFiles | ForEach-Object { Write-Host $_ }
           }
 
-          $enable_innodb_mtr = $false
+          $enable_innodb_mtr = $true
 
           if ($changedFiles.Count -gt 0) {
             if ($changedFiles | Where-Object { $_ -match '(^|/)(innodb|innobase)(/|$)' }) {
