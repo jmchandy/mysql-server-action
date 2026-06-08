@@ -102,6 +102,8 @@ jobs:
             cmake .. $DEBUG_OPTS
             make -j"$(nproc)"
           fi
+          echo "Searching for mysql-test..."
+          find "${GITHUB_WORKSPACE}/debug" -maxdepth 3 -type d | sort
           
       - name: Create package
         if: false
@@ -179,10 +181,17 @@ jobs:
             exit 0
           fi
 
-          echo "=== Top-level suites ==="
-          find "${MYSQL_TEST_DIR}/suite" -mindepth 1 -maxdepth 1 -type d \
-            -printf '%f\n' | sort      
-            
+          echo "=== MYSQL_TEST_DIR contents ==="
+          find "${MYSQL_TEST_DIR}" -maxdepth 2 -type d | sort
+
+          if [[ -d "${MYSQL_TEST_DIR}/suite" ]]; then
+            echo "=== Suites under suite/ ==="
+            find "${MYSQL_TEST_DIR}/suite" -mindepth 1 -maxdepth 1 -type d \
+              -printf '%f\n' | sort
+          else
+            echo "No suite directory found"
+          fi
+          
       - name: Extra MTR suites
         if: steps.diff.outputs.enable_extra_mtr == 'true'
         shell: bash
