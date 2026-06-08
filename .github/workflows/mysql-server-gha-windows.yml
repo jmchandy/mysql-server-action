@@ -7,7 +7,6 @@ on:
 jobs:
   windows-build:
     runs-on: windows-latest
-    timeout-minutes: 360
 
     steps:
       - name: Git setup
@@ -16,6 +15,7 @@ jobs:
           git config --global core.autocrlf false
           git config --global core.eol lf
           git config --system core.longpaths true
+          
       - name: Checkout
         uses: actions/checkout@v4
         with:
@@ -26,25 +26,35 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+
           $baseSha = '${{ github.event.pull_request.base.sha }}'
           $headSha = '${{ github.event.pull_request.head.sha }}'
-          $changedFiles = @(git diff --name-only $baseSha $headSha | Where-Object { $_ -and $_.Trim() })
-          Write-Host '================================='
+
+          $changedFiles = @(
+            git diff --name-only $baseSha $headSha |
+            Where-Object { $_ -and $_.Trim() }
+          )
+
           Write-Host 'Changed files detected in PR:'
-          Write-Host '================================='
           if ($changedFiles.Count -eq 0) {
             Write-Host '(none)'
-          } else {
+          }
+          else {
             $changedFiles | ForEach-Object { Write-Host $_ }
           }
-          Write-Host '================================='
-          $hasInnodbChanges = $false
+
+          $enable_innodb_mtr = $false
+
           if ($changedFiles.Count -gt 0) {
             if ($changedFiles | Where-Object { $_ -match '(^|/)(innodb|innobase)(/|$)' }) {
-              $hasInnodbChanges = $true
+              $enable_innodb_mtr = $true
             }
           }
-          "has_innodb_changes=$hasInnodbChanges" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+          @(
+            "enable_innodb_mtr=$enable_innodb_mtr"
+          ) | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          
       - name: Install OpenSSL
         id: openssl
         shell: pwsh
@@ -60,6 +70,7 @@ jobs:
           Write-Host "Using OpenSSL root: $opensslRoot"
           & "$($opensslDir.FullName)\bin\openssl.exe" version
           "openssl_root=$opensslRoot" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          
       - name: Install Bison
         shell: pwsh
         run: |
@@ -67,6 +78,7 @@ jobs:
           choco install winflexbison3 -y --no-progress
           where.exe win_bison
           win_bison --version
+          
       - name: Build
         shell: pwsh
         run: |
@@ -84,12 +96,14 @@ jobs:
           )
           & $cmake @args
           & $cmake --build . -- /m
+          
       - name: Create package
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           Set-Location bld
           & 'C:\Program Files\CMake\bin\cmake.exe' --build . --target package -- /m
+          
       - name: Run MTR
         shell: pwsh
         continue-on-error: true
@@ -97,14 +111,15 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $mysqlTestDir = Join-Path $env:GITHUB_WORKSPACE 'bld\mysql-test'
           $vardir = Join-Path $env:RUNNER_TEMP 'var-dir'
-          $summaryReport = Join-Path $env:GITHUB_WORKSPACE ("mtr-{0}.txt" -f $env:GITHUB_RUN_NUMBER)
-          $xmlReport = Join-Path $env:GITHUB_WORKSPACE 'mtr.xml'
+          $summaryReport = Join-Path $env:GITHUB_WORKSPACE ("build-error_main_{0}.txt" -f $env:GITHUB_RUN_NUMBER)
+          $xmlReport = Join-Path $env:GITHUB_WORKSPACE ("mtr_{0}.xml" -f $env:GITHUB_RUN_NUMBER)
+          $errLog = Join-Path $env:GITHUB_WORKSPACE ("mtr_{0}.err" -f $env:GITHUB_RUN_NUMBER)
           if (Test-Path $vardir) {
             Remove-Item -Recurse -Force $vardir
           }
           New-Item -ItemType Directory -Path $vardir | Out-Null
           Set-Location $mysqlTestDir
-          if ("${{ steps.diff.outputs.has_innodb_changes }}" -eq "true") {
+          if ("${{ steps.diff.outputs.enable_innodb_mtr }}" -eq "true") {
             perl mysql-test-run.pl `
               --vardir="$vardir" `
               --force `
@@ -115,7 +130,8 @@ jobs:
               --xml-report="$xmlReport" `
               --summary-report="$summaryReport" `
               --parallel=$env:NUMBER_OF_PROCESSORS `
-              --suite=innodb
+              --suite=innodb `
+              2>&1 | Tee-Object -FilePath $errLog
           }
           else {
             perl mysql-test-run.pl `
@@ -128,7 +144,8 @@ jobs:
               --xml-report="$xmlReport" `
               --summary-report="$summaryReport" `
               --parallel=$env:NUMBER_OF_PROCESSORS `
-              1st
+              1st `
+              2>&1 | Tee-Object -FilePath $errLog
           }
           
       - name: Organize artifacts
@@ -138,54 +155,34 @@ jobs:
           $ErrorActionPreference = 'Stop'
 
           Remove-Item -Recurse -Force artifacts -ErrorAction SilentlyContinue
-
           New-Item -ItemType Directory -Force -Path `
             artifacts/test-reports, `
             artifacts/summaries, `
             artifacts/logs, `
             artifacts/packages | Out-Null
 
-          $tempLogDir = Join-Path $env:RUNNER_TEMP 'var-dir\log'
+          $root = $env:GITHUB_WORKSPACE
 
-          # MTR reports
-          Get-ChildItem -Path $env:GITHUB_WORKSPACE -Filter 'mtr.xml' -File -ErrorAction SilentlyContinue |
+          # Test reports
+          Get-ChildItem -Path $root -Filter 'mtr_*.xml' -File -ErrorAction SilentlyContinue |
             Copy-Item -Destination artifacts/test-reports -Force
 
-          Get-ChildItem -Path $env:GITHUB_WORKSPACE -Filter 'mtr-*.txt' -File -ErrorAction SilentlyContinue |
+          # Summaries
+          Get-ChildItem -Path $root -Filter 'build-error*.txt' -File -ErrorAction SilentlyContinue |
             Copy-Item -Destination artifacts/summaries -Force
 
-          Get-ChildItem -Path $env:GITHUB_WORKSPACE -Filter 'mtr.err' -File -ErrorAction SilentlyContinue |
+          # Logs
+          Get-ChildItem -Path $root -Filter 'mtr_*.err' -File -ErrorAction SilentlyContinue |
             Copy-Item -Destination artifacts/logs -Force
 
-          Get-ChildItem -Path $env:GITHUB_WORKSPACE -Filter 'build-error_*.txt' -File -ErrorAction SilentlyContinue |
-            Copy-Item -Destination artifacts/summaries -Force
-
           # Packages
-          Get-ChildItem -Path (Join-Path $env:GITHUB_WORKSPACE 'bld') `
-            -Include *.tar.gz,*.tgz,*.zip,*.rpm,*.deb `
-            -File -Recurse -ErrorAction SilentlyContinue |
+          Get-ChildItem -Path (Join-Path $root 'bld') -Recurse -File -Include *.tar.gz, *.tgz, *.zip -ErrorAction SilentlyContinue |
             Copy-Item -Destination artifacts/packages -Force
-
-          # MTR logs
-          if (Test-Path $tempLogDir) {
-            Copy-Item -Path $tempLogDir -Destination artifacts/logs -Recurse -Force
-          }
-          
+            
       - name: Upload artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: mysql-ci-artifacts
           if-no-files-found: ignore
           path: artifacts/
-          
-      - name: Cleanup
-        if: always()
-        shell: pwsh
-        run: |
-          if (Test-Path bld) {
-            Remove-Item -Recurse -Force bld
-          }
-          if (Test-Path mtr.xml) {
-            Remove-Item -Force mtr.xml
-          }
