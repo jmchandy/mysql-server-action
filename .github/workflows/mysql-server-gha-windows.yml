@@ -26,15 +26,12 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-
           $baseSha = '${{ github.event.pull_request.base.sha }}'
           $headSha = '${{ github.event.pull_request.head.sha }}'
-
           $changedFiles = @(
             git diff --name-only $baseSha $headSha |
             Where-Object { $_ -and $_.Trim() }
           )
-
           Write-Host 'Changed files detected in PR:'
           if ($changedFiles.Count -eq 0) {
             Write-Host '(none)'
@@ -42,15 +39,12 @@ jobs:
           else {
             $changedFiles | ForEach-Object { Write-Host $_ }
           }
-
           $enable_innodb_mtr = $true
-
           if ($changedFiles.Count -gt 0) {
             if ($changedFiles | Where-Object { $_ -match '(^|/)(innodb|innobase)(/|$)' }) {
               $enable_innodb_mtr = $true
             }
           }
-
           @(
             "enable_innodb_mtr=$enable_innodb_mtr"
           ) | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
@@ -71,13 +65,13 @@ jobs:
           & "$($opensslDir.FullName)\bin\openssl.exe" version
           "openssl_root=$opensslRoot" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           
-      - name: Setup MSYS2 and install Bison
-        uses: msys2/setup-msys2@v2
-        with:
-          update: true
-          install: >-
-            bison
-            flex
+      - name: Install Bison
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          choco install winflexbison3 -y --no-progress
+          where.exe win_bison
+          win_bison --version
           
       - name: Build
         shell: pwsh
@@ -91,7 +85,7 @@ jobs:
             '-G', 'Visual Studio 17 2022'
             '-DWITH_BOOST=C:/boost'
             '-DWITH_SSL=${{ steps.openssl.outputs.openssl_root }}'
-            '-DBISON_EXECUTABLE=C:/msys64/usr/bin/bison.exe
+            '-DBISON_EXECUTABLE=C:/ProgramData/chocolatey/bin/win_bison.exe'
             '..'
           )
           & $cmake @args
@@ -153,28 +147,26 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-
           Remove-Item -Recurse -Force artifacts -ErrorAction SilentlyContinue
           New-Item -ItemType Directory -Force -Path `
             artifacts/test-reports, `
             artifacts/summaries, `
             artifacts/logs, `
             artifacts/packages | Out-Null
-
           $root = $env:GITHUB_WORKSPACE
-
+          
           # Test reports
           Get-ChildItem -Path $root -Filter 'mtr_*.xml' -File -ErrorAction SilentlyContinue |
             Copy-Item -Destination artifacts/test-reports -Force
-
+            
           # Summaries
           Get-ChildItem -Path $root -Filter 'build-error*.txt' -File -ErrorAction SilentlyContinue |
             Copy-Item -Destination artifacts/summaries -Force
-
+            
           # Logs
           Get-ChildItem -Path $root -Filter 'mtr_*.err' -File -ErrorAction SilentlyContinue |
             Copy-Item -Destination artifacts/logs -Force
-
+            
           # Packages
           Get-ChildItem -Path (Join-Path $root 'bld') -Recurse -File -Include *.tar.gz, *.tgz, *.zip -ErrorAction SilentlyContinue |
             Copy-Item -Destination artifacts/packages -Force
