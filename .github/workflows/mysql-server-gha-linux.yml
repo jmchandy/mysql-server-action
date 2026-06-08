@@ -10,7 +10,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -53,7 +53,7 @@ jobs:
           hypergraph_re='^(sql/join_optimizer.*|sql/iterators.*|sql/range_optimizer.*|sql/sql_.*|sql/query_.*|sql/opt_.*|sql/window.*|sql/item.*|sql/handler.*|sql/histogram/.*)'
           innodb_re='^(storage/innobase/|mysql-test/suite/innodb)'
           enable_hypergraph=false
-          build_debug_tree=true
+          build_debug_tree=false
           enable_ndb=false
           enable_extra_mtr=false
   
@@ -63,6 +63,8 @@ jobs:
             fi
             if printf '%s\n' "${changed_files[@]}" | grep -Eq "$innodb_re"; then
               build_debug_tree=true
+            fi
+            if printf '%s\n' "${changed_files[@]}" | grep -Eq '(innobase|innodb)'; then
               enable_extra_mtr=true
             fi
             if printf '%s\n' "${changed_files[@]}" | grep -Eq '^(storage/ndb/|sql/dd/ndbinfo_schema|mysql-test/suite/.*ndb.*)'; then
@@ -88,6 +90,11 @@ jobs:
             BUILD_OPTS="$BUILD_OPTS -DWITH_HYPERGRAPH_OPTIMIZER=ON"
           fi
           rm -rf "${GITHUB_WORKSPACE}/bld" "${GITHUB_WORKSPACE}/debug"
+          mkdir -p bld
+          cd bld
+          echo "cmake .. $BUILD_OPTS"
+          cmake .. $BUILD_OPTS
+          make -j"$(nproc)"
           if [[ "${{ steps.diff.outputs.build_debug_tree }}" == "true" ]]; then
             cd "${GITHUB_WORKSPACE}"
             mkdir -p debug
@@ -97,6 +104,8 @@ jobs:
             cmake .. $DEBUG_OPTS
             make -j"$(nproc)"
           fi
+          echo "Searching for mysql-test..."
+          find "${GITHUB_WORKSPACE}/debug" -maxdepth 3 -type d | sort
           
       - name: Create package
         if: false
@@ -158,7 +167,7 @@ jobs:
             --hypergraph \
             --skip-ndb \
             --skip-suite=rapid
-            
+          
       - name: Extra MTR suites
         if: steps.diff.outputs.enable_extra_mtr == 'true'
         shell: bash
@@ -166,24 +175,15 @@ jobs:
         run: |
           set +e
           extra_report="${GITHUB_WORKSPACE}/extra_suites_${GITHUB_RUN_NUMBER}.txt"
-          mysql_test_dir="${GITHUB_WORKSPACE}/debug/mysql-test"
-          
-          extra_suites=()
-          for s in meb meb_ddl innodb_fts innodb_undo innodb_gis innodb_zip; do
-            if [[ -d "${mysql_test_dir}/suite/${s}" || -d "${mysql_test_dir}/${s}" ]]; then
-              extra_suites+=("$s")
-            fi
-          done
-          if ((${#extra_suites[@]} == 0)); then
-            echo "No extra suites found in ${mysql_test_dir}, skipping."
-            exit 0
-          fi
-          
+
+          mysql_test_dir="${GITHUB_WORKSPACE}/mysql-test"
+
+          extra_suites=(innodb_fts innodb_undo innodb_gis innodb_zip)
+
           rm -rf /dev/shm/var_auto_* || true
           cd "${mysql_test_dir}"
-          
+
           perl mysql-test-run.pl \
-            --nounit-tests \
             --force \
             --mem \
             --retry-failure=2 \
@@ -193,7 +193,7 @@ jobs:
             --parallel "$(nproc)" \
             --summary-report="${extra_report}" \
             --suite="$(IFS=,; echo "${extra_suites[*]}")"
-            
+      
       - name: Debug
         if: steps.diff.outputs.build_debug_tree == 'true'
         shell: bash
@@ -285,7 +285,7 @@ jobs:
           
       - name: Upload artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: mysql-ci-artifacts
           if-no-files-found: ignore
