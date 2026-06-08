@@ -52,10 +52,10 @@ jobs:
           fi
           hypergraph_re='^(sql/join_optimizer.*|sql/iterators.*|sql/range_optimizer.*|sql/sql_.*|sql/query_.*|sql/opt_.*|sql/window.*|sql/item.*|sql/handler.*|sql/histogram/.*)'
           innodb_re='^(storage/innobase/|mysql-test/suite/innodb)'
-          enable_hypergraph=true
-          build_debug_tree=false
-          enable_ndb=true
-          enable_extra_mtr=false
+          enable_hypergraph=false
+          build_debug_tree=true
+          enable_ndb=false
+          enable_extra_mtr=true
   
           if (( ${#changed_files[@]} > 0 )); then
             if printf '%s\n' "${changed_files[@]}" | grep -Eq "$hypergraph_re"; then
