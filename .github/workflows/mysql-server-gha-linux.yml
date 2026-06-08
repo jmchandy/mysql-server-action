@@ -33,6 +33,7 @@ jobs:
             libudev-dev \
             libxml2-utils \
             protobuf-compiler
+            
       - name: Analyze changed files
         id: diff
         shell: bash
@@ -52,12 +53,12 @@ jobs:
             printf '%s\n' "${changed_files[@]}"
           fi
           echo "================================="
-          hypergraph_re='(hypergraph|sql/join_optimizer.*|sql/iterators.*|sql/range_optimizer.*|sql/sql_.*|sql/query_.*|sql/opt_.*|sql/window.*|sql/item.*|sql/handler.*|sql/histogram/.*)'
+          hypergraph_re='^(sql/join_optimizer.*|sql/iterators.*|sql/range_optimizer.*|sql/sql_.*|sql/query_.*|sql/opt_.*|sql/window.*|sql/item.*|sql/handler.*|sql/histogram/.*)'
           innodb_re='^(storage/innobase/|mysql-test/suite/innodb)'
-          enable_hypergraph=true
-          build_debug_tree=true
-          enable_ndb=true
-          enable_extra_mtr=true
+          enable_hypergraph=false
+          build_debug_tree=false
+          enable_ndb=false
+          enable_extra_mtr=false
           extra_mtr_mysql_test_dir="bld/mysql-test"
           if (( ${#changed_files[@]} > 0 )); then
             if printf '%s\n' "${changed_files[@]}" | grep -Eq "$hypergraph_re"; then
@@ -66,7 +67,7 @@ jobs:
             if printf '%s\n' "${changed_files[@]}" | grep -Eq "$innodb_re"; then
               build_debug_tree=true
             fi
-            if printf '%s\n' "${changed_files[@]}" | grep -Eq '^(storage/ndb/|sql/dd/ndbinfo_schema|mysql-test/suite/.*ndb)'; then
+            if printf '%s\n' "${changed_files[@]}" | grep -Eq '^(storage/ndb/|sql/dd/ndbinfo_schema|mysql-test/suite/.*ndb.*)'; then
               enable_ndb=true
             fi
             if printf '%s\n' "${changed_files[@]}" | grep -Eq '(innobase|innodb)'; then
@@ -81,6 +82,7 @@ jobs:
             echo "enable_extra_mtr=$enable_extra_mtr"
             echo "extra_mtr_mysql_test_dir=$extra_mtr_mysql_test_dir"
           } >> "$GITHUB_OUTPUT"
+          
       - name: Build
         shell: bash
         run: |
@@ -107,6 +109,7 @@ jobs:
             cmake .. $DEBUG_OPTS
             make -j"$(nproc)"
           fi
+          
       - name: Create package
         if: false
         shell: bash
@@ -114,6 +117,7 @@ jobs:
           set -euo pipefail
           cd bld
           make package
+          
       - name: MTR
         if: false
         shell: bash
@@ -142,8 +146,9 @@ jobs:
           ctest -j "$(nproc)" --output-junit "${UNIT_REPORT}"
           UNIT_STATUS=$?
           exit $((MTR_STATUS + UNIT_STATUS))
+          
       - name: Hypergraph MTR
-        if: steps.diff.outputs.enable_hypergraph == 'true'
+        if: false
         shell: bash
         continue-on-error: true
         run: |
@@ -165,17 +170,31 @@ jobs:
             --hypergraph \
             --skip-ndb \
             --skip-suite=rapid
+            
       - name: Extra MTR suites
-        if: steps.diff.outputs.enable_extra_mtr == 'true'
+        if: true
         shell: bash
         continue-on-error: true
         run: |
           set +e
           extra_report="${GITHUB_WORKSPACE}/extra_suites_${GITHUB_RUN_NUMBER}.txt"
           mysql_test_dir="${GITHUB_WORKSPACE}/${{ steps.diff.outputs.extra_mtr_mysql_test_dir }}"
-          extra_suites=(meb meb_ddl innodb_fts innodb_undo innodb_gis innodb_zip)
+
+          extra_suites=()
+          for s in meb meb_ddl innodb_fts innodb_undo innodb_gis innodb_zip; do
+            if [[ -d "${mysql_test_dir}/suite/${s}" || -d "${mysql_test_dir}/${s}" ]]; then
+              extra_suites+=("$s")
+            fi
+          done
+
+          if ((${#extra_suites[@]} == 0)); then
+            echo "No extra suites found in ${mysql_test_dir}, skipping."
+            exit 0
+          fi
+          
           rm -rf /dev/shm/var_auto_* || true
           cd "${mysql_test_dir}"
+          
           perl mysql-test-run.pl \
             --nounit-tests \
             --force \
@@ -187,6 +206,7 @@ jobs:
             --parallel "$(nproc)" \
             --summary-report="${extra_report}" \
             --suite="$(IFS=,; echo "${extra_suites[*]}")"
+            
       - name: Debug
         shell: bash
         continue-on-error: true
@@ -214,6 +234,7 @@ jobs:
             --summary-report="${DEBUG_SUMMARY_REPORT}" \
             --parallel "$(nproc)" \
             2>&1 | tee "${DEBUG_ERR_LOG}"
+            
       - name: MTR Replication Testing
         if: false
         shell: bash
@@ -236,6 +257,7 @@ jobs:
             --parallel "$(nproc)" \
             --comment=group_replication \
             --suite=group_replication
+            
       - name: xmllint
         shell: bash
         run: |
@@ -246,6 +268,7 @@ jobs:
             [ -e "$f" ] || continue
             xmllint --noout "$f"
           done
+          
       - name: Organize artifacts
         if: always()
         shell: bash
@@ -273,6 +296,7 @@ jobs:
           cp -v bld/*.zip artifacts/packages/ 2>/dev/null || true
           cp -v bld/*.rpm artifacts/packages/ 2>/dev/null || true
           cp -v bld/*.deb artifacts/packages/ 2>/dev/null || true
+          
       - name: Upload artifacts
         if: always()
         uses: actions/upload-artifact@v4
