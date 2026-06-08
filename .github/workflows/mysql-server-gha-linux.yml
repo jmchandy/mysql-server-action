@@ -10,7 +10,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -163,6 +163,25 @@ jobs:
             --hypergraph \
             --skip-ndb \
             --skip-suite=rapid
+
+      - name: Debug available MTR suites
+        if: steps.diff.outputs.enable_extra_mtr == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          MYSQL_TEST_DIR="${GITHUB_WORKSPACE}/debug/mysql-test"
+
+          echo "MYSQL_TEST_DIR=${MYSQL_TEST_DIR}"
+
+          if [[ ! -d "${MYSQL_TEST_DIR}" ]]; then
+            echo "Directory does not exist"
+            exit 0
+          fi
+
+          echo "=== Top-level suites ==="
+          find "${MYSQL_TEST_DIR}/suite" -mindepth 1 -maxdepth 1 -type d \
+            -printf '%f\n' | sort      
             
       - name: Extra MTR suites
         if: steps.diff.outputs.enable_extra_mtr == 'true'
@@ -290,7 +309,7 @@ jobs:
           
       - name: Upload artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: mysql-ci-artifacts
           if-no-files-found: ignore
