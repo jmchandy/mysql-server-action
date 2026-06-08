@@ -44,35 +44,29 @@ jobs:
           mapfile -t changed_files < <(
             git diff --name-only "$base_sha" "$head_sha" | sed '/^$/d'
           )
-          echo "================================="
           echo "Changed files detected in PR:"
-          echo "================================="
           if (( ${#changed_files[@]} == 0 )); then
             echo "(none)"
           else
             printf '%s\n' "${changed_files[@]}"
           fi
-          echo "================================="
           hypergraph_re='^(sql/join_optimizer.*|sql/iterators.*|sql/range_optimizer.*|sql/sql_.*|sql/query_.*|sql/opt_.*|sql/window.*|sql/item.*|sql/handler.*|sql/histogram/.*)'
           innodb_re='^(storage/innobase/|mysql-test/suite/innodb)'
           enable_hypergraph=false
           build_debug_tree=false
           enable_ndb=false
           enable_extra_mtr=false
-          extra_mtr_mysql_test_dir="bld/mysql-test"
+  
           if (( ${#changed_files[@]} > 0 )); then
             if printf '%s\n' "${changed_files[@]}" | grep -Eq "$hypergraph_re"; then
               enable_hypergraph=true
             fi
             if printf '%s\n' "${changed_files[@]}" | grep -Eq "$innodb_re"; then
               build_debug_tree=true
+              enable_extra_mtr=true
             fi
             if printf '%s\n' "${changed_files[@]}" | grep -Eq '^(storage/ndb/|sql/dd/ndbinfo_schema|mysql-test/suite/.*ndb.*)'; then
               enable_ndb=true
-            fi
-            if printf '%s\n' "${changed_files[@]}" | grep -Eq '(innobase|innodb)'; then
-              enable_extra_mtr=true
-              extra_mtr_mysql_test_dir="debug/mysql-test"
             fi
           fi
           {
@@ -80,7 +74,6 @@ jobs:
             echo "build_debug_tree=$build_debug_tree"
             echo "enable_ndb=$enable_ndb"
             echo "enable_extra_mtr=$enable_extra_mtr"
-            echo "extra_mtr_mysql_test_dir=$extra_mtr_mysql_test_dir"
           } >> "$GITHUB_OUTPUT"
           
       - name: Build
@@ -111,7 +104,6 @@ jobs:
           fi
           
       - name: Create package
-        if: false
         shell: bash
         run: |
           set -euo pipefail
@@ -119,14 +111,13 @@ jobs:
           make package
           
       - name: MTR
-        if: false
         shell: bash
         continue-on-error: true
         run: |
           set +e
-          export XML_REPORT="${GITHUB_WORKSPACE}/mtr-${GITHUB_RUN_NUMBER}.xml"
-          export UNIT_REPORT="${GITHUB_WORKSPACE}/mtr-unit-${GITHUB_RUN_NUMBER}.xml"
-          export SUMMARY_REPORT="${GITHUB_WORKSPACE}/build-error_${GITHUB_RUN_NUMBER}.txt"
+          export XML_REPORT="${GITHUB_WORKSPACE}/mtr_${GITHUB_RUN_NUMBER}.xml"
+          export UNIT_REPORT="${GITHUB_WORKSPACE}/mtr-unit_${GITHUB_RUN_NUMBER}.xml"
+          export SUMMARY_REPORT="${GITHUB_WORKSPACE}/build-error_main_${GITHUB_RUN_NUMBER}.txt"
           export MYSQL_TEST_DIR="${GITHUB_WORKSPACE}/bld/mysql-test"
           if [ ! -d "${MYSQL_TEST_DIR}" ]; then
             touch "${XML_REPORT}"
@@ -148,7 +139,7 @@ jobs:
           exit $((MTR_STATUS + UNIT_STATUS))
           
       - name: Hypergraph MTR
-        if: false
+        if: steps.diff.outputs.enable_hypergraph == 'true'
         shell: bash
         continue-on-error: true
         run: |
@@ -172,21 +163,20 @@ jobs:
             --skip-suite=rapid
             
       - name: Extra MTR suites
-        if: true
+        if: steps.diff.outputs.enable_extra_mtr == 'true'
         shell: bash
         continue-on-error: true
         run: |
           set +e
           extra_report="${GITHUB_WORKSPACE}/extra_suites_${GITHUB_RUN_NUMBER}.txt"
-          mysql_test_dir="${GITHUB_WORKSPACE}/${{ steps.diff.outputs.extra_mtr_mysql_test_dir }}"
-
+          mysql_test_dir="${GITHUB_WORKSPACE}/debug/mysql-test"
+          
           extra_suites=()
           for s in meb meb_ddl innodb_fts innodb_undo innodb_gis innodb_zip; do
             if [[ -d "${mysql_test_dir}/suite/${s}" || -d "${mysql_test_dir}/${s}" ]]; then
               extra_suites+=("$s")
             fi
           done
-
           if ((${#extra_suites[@]} == 0)); then
             echo "No extra suites found in ${mysql_test_dir}, skipping."
             exit 0
@@ -208,19 +198,15 @@ jobs:
             --suite="$(IFS=,; echo "${extra_suites[*]}")"
             
       - name: Debug
+        if: steps.diff.outputs.build_debug_tree == 'true'
         shell: bash
         continue-on-error: true
         run: |
           set -o pipefail
           DEBUG_TEST_DIR="${GITHUB_WORKSPACE}/debug/mysql-test"
-          DEBUG_XML_REPORT="${GITHUB_WORKSPACE}/mtr-debug.xml"
+          DEBUG_XML_REPORT="${GITHUB_WORKSPACE}/mtr-debug_${GITHUB_RUN_NUMBER}.xml"
           DEBUG_SUMMARY_REPORT="${GITHUB_WORKSPACE}/build-error_debug_${GITHUB_RUN_NUMBER}.txt"
-          DEBUG_ERR_LOG="${GITHUB_WORKSPACE}/mtr.err"
-          if [ ! -d "${DEBUG_TEST_DIR}" ]; then
-            touch "${DEBUG_XML_REPORT}"
-            echo "skipped" > "${DEBUG_SUMMARY_REPORT}"
-            exit 0
-          fi
+          DEBUG_ERR_LOG="${GITHUB_WORKSPACE}/mtr_${GITHUB_RUN_NUMBER}.err"
           rm -rf /dev/shm/var_auto_*
           cd "${DEBUG_TEST_DIR}"
           perl mysql-test-run.pl \
@@ -236,12 +222,11 @@ jobs:
             2>&1 | tee "${DEBUG_ERR_LOG}"
             
       - name: MTR Replication Testing
-        if: false
         shell: bash
         continue-on-error: true
         run: |
           set -euo pipefail
-          export REPL_REPORT="${GITHUB_WORKSPACE}/mtr-replication.xml"
+          export REPL_REPORT="${GITHUB_WORKSPACE}/mtr-replication_${GITHUB_RUN_NUMBER}.xml"
           export REPL_SUMMARY="${GITHUB_WORKSPACE}/build-error_replication_${GITHUB_RUN_NUMBER}.txt"
           rm -rf /dev/shm/var_auto_* || true
           cd "${GITHUB_WORKSPACE}/bld/mysql-test"
@@ -263,8 +248,8 @@ jobs:
         run: |
           set -euo pipefail
           cd "${GITHUB_WORKSPACE}"
-          find . -name mtr-debug.xml -size 0 -delete
-          for f in mtr-*.xml; do
+          find . -name 'mtr_*.xml' -size 0 -delete
+          for f in mtr_*.xml; do
             [ -e "$f" ] || continue
             xmllint --noout "$f"
           done
@@ -280,22 +265,25 @@ jobs:
             artifacts/summaries \
             artifacts/logs \
             artifacts/packages
+    
           shopt -s nullglob
-          cp -v mtr-*.xml artifacts/test-reports/ 2>/dev/null || true
-          cp -v mtr-unit-*.xml artifacts/test-reports/ 2>/dev/null || true
-          cp -v mtr-replication.xml artifacts/test-reports/ 2>/dev/null || true
-          cp -v mtr-debug.xml artifacts/test-reports/ 2>/dev/null || true
-          cp -v build-error_*.txt artifacts/summaries/ 2>/dev/null || true
+
+          # Test reports
+          cp -v mtr_*.xml artifacts/test-reports/ 2>/dev/null || true
+
+          # Summaries
+          cp -v build-error_main_*.txt artifacts/summaries/ 2>/dev/null || true
           cp -v build-error_debug_*.txt artifacts/summaries/ 2>/dev/null || true
           cp -v build-error_replication_*.txt artifacts/summaries/ 2>/dev/null || true
           cp -v extra_suites_*.txt artifacts/summaries/ 2>/dev/null || true
           cp -v hypergraph_*.txt artifacts/summaries/ 2>/dev/null || true
-          cp -v mtr.err artifacts/logs/ 2>/dev/null || true
-          cp -v bld/*.tar.gz artifacts/packages/ 2>/dev/null || true
-          cp -v bld/*.tgz artifacts/packages/ 2>/dev/null || true
-          cp -v bld/*.zip artifacts/packages/ 2>/dev/null || true
-          cp -v bld/*.rpm artifacts/packages/ 2>/dev/null || true
-          cp -v bld/*.deb artifacts/packages/ 2>/dev/null || true
+
+          # Logs
+          cp -v mtr_*.err artifacts/logs/ 2>/dev/null || true
+
+          # Packages
+          find bld -type f \( -name '*.tar.gz' -o -name '*.tgz' -o -name '*.zip' \) \
+            -exec cp -v {} artifacts/packages/ \; 2>/dev/null || true
           
       - name: Upload artifacts
         if: always()
