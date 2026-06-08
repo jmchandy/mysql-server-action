@@ -45,7 +45,6 @@ jobs:
             }
           }
           "has_innodb_changes=$hasInnodbChanges" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-          
       - name: Install OpenSSL
         id: openssl
         shell: pwsh
@@ -61,7 +60,6 @@ jobs:
           Write-Host "Using OpenSSL root: $opensslRoot"
           & "$($opensslDir.FullName)\bin\openssl.exe" version
           "openssl_root=$opensslRoot" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-          
       - name: Install Bison
         shell: pwsh
         run: |
@@ -69,7 +67,6 @@ jobs:
           choco install winflexbison3 -y --no-progress
           where.exe win_bison
           win_bison --version
-          
       - name: Build
         shell: pwsh
         run: |
@@ -87,14 +84,12 @@ jobs:
           )
           & $cmake @args
           & $cmake --build . -- /m
-          
       - name: Create package
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           Set-Location bld
           & 'C:\Program Files\CMake\bin\cmake.exe' --build . --target package -- /m
-          
       - name: Run MTR
         shell: pwsh
         continue-on-error: true
@@ -109,17 +104,32 @@ jobs:
           }
           New-Item -ItemType Directory -Path $vardir | Out-Null
           Set-Location $mysqlTestDir
-          perl mysql-test-run.pl `
-            --vardir="$vardir" `
-            --force `
-            --retry-failure=2 `
-            --retry=2 `
-            --report-unstable-tests `
-            --clean-vardir `
-            --xml-report="$xmlReport" `
-            --summary-report="$summaryReport" `
-            --parallel=$env:NUMBER_OF_PROCESSORS `
-            --suite=innodb
+          if ("${{ steps.diff.outputs.has_innodb_changes }}" -eq "true") {
+            perl mysql-test-run.pl `
+              --vardir="$vardir" `
+              --force `
+              --retry-failure=2 `
+              --retry=2 `
+              --report-unstable-tests `
+              --clean-vardir `
+              --xml-report="$xmlReport" `
+              --summary-report="$summaryReport" `
+              --parallel=$env:NUMBER_OF_PROCESSORS `
+              --suite=innodb
+          }
+          else {
+            perl mysql-test-run.pl `
+              --vardir="$vardir" `
+              --force `
+              --retry-failure=2 `
+              --retry=2 `
+              --report-unstable-tests `
+              --clean-vardir `
+              --xml-report="$xmlReport" `
+              --summary-report="$summaryReport" `
+              --parallel=$env:NUMBER_OF_PROCESSORS `
+              1st
+          }
           
       - name: Organize artifacts
         if: always()
@@ -128,6 +138,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
 
           Remove-Item -Recurse -Force artifacts -ErrorAction SilentlyContinue
+
           New-Item -ItemType Directory -Force -Path `
             artifacts/test-reports, `
             artifacts/summaries, `
@@ -136,46 +147,30 @@ jobs:
 
           $tempLogDir = Join-Path $env:RUNNER_TEMP 'var-dir\log'
 
-          Get-ChildItem -Path $env:GITHUB_WORKSPACE -Filter 'mtr-*.xml' -File -ErrorAction SilentlyContinue |
+          # MTR reports
+          Get-ChildItem -Path $env:GITHUB_WORKSPACE -Filter 'mtr.xml' -File -ErrorAction SilentlyContinue |
             Copy-Item -Destination artifacts/test-reports -Force
-
-          Get-ChildItem -Path $env:GITHUB_WORKSPACE -Filter 'mtr-unit-*.xml' -File -ErrorAction SilentlyContinue |
-            Copy-Item -Destination artifacts/test-reports -Force
-
-          Get-ChildItem -Path $env:GITHUB_WORKSPACE -Filter 'mtr-replication.xml' -File -ErrorAction SilentlyContinue |
-            Copy-Item -Destination artifacts/test-reports -Force
-
-          Get-ChildItem -Path $env:GITHUB_WORKSPACE -Filter 'mtr-debug.xml' -File -ErrorAction SilentlyContinue |
-            Copy-Item -Destination artifacts/test-reports -Force
-
-          Get-ChildItem -Path $env:GITHUB_WORKSPACE -Filter 'mtr.err' -File -ErrorAction SilentlyContinue |
-            Copy-Item -Destination artifacts/logs -Force
 
           Get-ChildItem -Path $env:GITHUB_WORKSPACE -Filter 'mtr-*.txt' -File -ErrorAction SilentlyContinue |
             Copy-Item -Destination artifacts/summaries -Force
 
+          Get-ChildItem -Path $env:GITHUB_WORKSPACE -Filter 'mtr.err' -File -ErrorAction SilentlyContinue |
+            Copy-Item -Destination artifacts/logs -Force
+
           Get-ChildItem -Path $env:GITHUB_WORKSPACE -Filter 'build-error_*.txt' -File -ErrorAction SilentlyContinue |
             Copy-Item -Destination artifacts/summaries -Force
 
-          Get-ChildItem -Path $env:GITHUB_WORKSPACE -Filter 'build-error_debug_*.txt' -File -ErrorAction SilentlyContinue |
-            Copy-Item -Destination artifacts/summaries -Force
-
-          Get-ChildItem -Path $env:GITHUB_WORKSPACE -Filter 'build-error_replication_*.txt' -File -ErrorAction SilentlyContinue |
-            Copy-Item -Destination artifacts/summaries -Force
-
-          Get-ChildItem -Path $env:GITHUB_WORKSPACE -Filter 'extra_suites_*.txt' -File -ErrorAction SilentlyContinue |
-            Copy-Item -Destination artifacts/summaries -Force
-
-          Get-ChildItem -Path $env:GITHUB_WORKSPACE -Filter 'hypergraph_*.txt' -File -ErrorAction SilentlyContinue |
-            Copy-Item -Destination artifacts/summaries -Force
-
-          Get-ChildItem -Path (Join-Path $env:GITHUB_WORKSPACE 'bld') -Include *.tar.gz,*.tgz,*.zip,*.rpm,*.deb -File -Recurse -ErrorAction SilentlyContinue |
+          # Packages
+          Get-ChildItem -Path (Join-Path $env:GITHUB_WORKSPACE 'bld') `
+            -Include *.tar.gz,*.tgz,*.zip,*.rpm,*.deb `
+            -File -Recurse -ErrorAction SilentlyContinue |
             Copy-Item -Destination artifacts/packages -Force
 
+          # MTR logs
           if (Test-Path $tempLogDir) {
             Copy-Item -Path $tempLogDir -Destination artifacts/logs -Recurse -Force
           }
-
+          
       - name: Upload artifacts
         if: always()
         uses: actions/upload-artifact@v4
