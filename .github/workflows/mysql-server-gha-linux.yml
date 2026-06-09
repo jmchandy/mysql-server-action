@@ -102,7 +102,7 @@ jobs:
           set +e
           export XML_REPORT="${GITHUB_WORKSPACE}/mtr_${GITHUB_RUN_NUMBER}.xml"
           export UNIT_REPORT="${GITHUB_WORKSPACE}/mtr-unit_${GITHUB_RUN_NUMBER}.xml"
-          export SUMMARY_REPORT="${GITHUB_WORKSPACE}/build-error_main_${GITHUB_RUN_NUMBER}.txt"
+          export SUMMARY_REPORT="${GITHUB_WORKSPACE}/build-error_main_${GITHUB_RUN_NUMBER}.txt" 
           export MYSQL_TEST_DIR="${GITHUB_WORKSPACE}/bld/mysql-test"
           if [ ! -d "${MYSQL_TEST_DIR}" ]; then
             touch "${XML_REPORT}"
