@@ -6,7 +6,10 @@ on:
 
 jobs:
   linux-build:
-    runs-on: ubuntu-latest
+    runs-on:
+      - self-hosted
+      - Linux
+      - X64
 
     steps:
       - name: Checkout
@@ -52,9 +55,9 @@ jobs:
           fi
           hypergraph_re='^(sql/join_optimizer.*|sql/iterators.*|sql/range_optimizer.*|sql/sql_.*|sql/query_.*|sql/opt_.*|sql/window.*|sql/item.*|sql/handler.*|sql/histogram/.*)'
           innodb_re='^(storage/innobase/|mysql-test/suite/innodb)'
-          enable_hypergraph=false
-          build_debug_tree=false
-          enable_ndb=false
+          enable_hypergraph=true
+          build_debug_tree=true
+          enable_ndb=true
           enable_extra_mtr=true
   
           if (( ${#changed_files[@]} > 0 )); then
@@ -106,7 +109,6 @@ jobs:
           fi
           
       - name: Create package
-        if: false
         shell: bash
         run: |
           set -euo pipefail
@@ -114,7 +116,6 @@ jobs:
           make package
           
       - name: MTR
-        if: false
         shell: bash
         continue-on-error: true
         run: |
@@ -216,7 +217,6 @@ jobs:
             2>&1 | tee "${DEBUG_ERR_LOG}"
             
       - name: MTR Replication Testing
-        if: false
         shell: bash
         continue-on-error: true
         run: |
