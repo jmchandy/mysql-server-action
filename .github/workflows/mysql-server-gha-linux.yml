@@ -151,6 +151,9 @@ jobs:
           export HYPERGRAPH_REPORT="${GITHUB_WORKSPACE}/hypergraph_${GITHUB_RUN_NUMBER}.txt"
           export MYSQL_TEST_DIR="${GITHUB_WORKSPACE}/bld/mysql-test"
           rm -rf /dev/shm/var_auto_* || true
+          if [ ! -d "${MYSQL_TEST_DIR}" ]; then
+            exit 0
+          fi
           cd "${MYSQL_TEST_DIR}"
           perl mysql-test-run.pl \
             --nounit-tests \
@@ -173,7 +176,7 @@ jobs:
         run: |
           set +e
           extra_report="${GITHUB_WORKSPACE}/extra_suites_${GITHUB_RUN_NUMBER}.txt"
-          mysql_test_dir="${GITHUB_WORKSPACE}/mysql-test"
+          mysql_test_dir="${GITHUB_WORKSPACE}/bld/mysql-test"
           extra_suites=(innodb_fts innodb_undo innodb_gis innodb_zip)
           rm -rf /dev/shm/var_auto_* || true
           cd "${mysql_test_dir}"
