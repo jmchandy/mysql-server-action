@@ -53,7 +53,7 @@ jobs:
           hypergraph_re='^(sql/join_optimizer.*|sql/iterators.*|sql/range_optimizer.*|sql/sql_.*|sql/query_.*|sql/opt_.*|sql/window.*|sql/item.*|sql/handler.*|sql/histogram/.*)'
           innodb_re='^(storage/innobase/|mysql-test/suite/innodb)'
           enable_hypergraph=false
-          build_debug_tree=true
+          build_debug_tree=false
           enable_ndb=false
           enable_extra_mtr=false
   
@@ -63,6 +63,8 @@ jobs:
             fi
             if printf '%s\n' "${changed_files[@]}" | grep -Eq "$innodb_re"; then
               build_debug_tree=true
+            fi
+            if printf '%s\n' "${changed_files[@]}" | grep -Eq '(innobase|innodb)'; then
               enable_extra_mtr=true
             fi
             if printf '%s\n' "${changed_files[@]}" | grep -Eq '^(storage/ndb/|sql/dd/ndbinfo_schema|mysql-test/suite/.*ndb.*)'; then
@@ -102,8 +104,6 @@ jobs:
             cmake .. $DEBUG_OPTS
             make -j"$(nproc)"
           fi
-          echo "Searching for mysql-test..."
-          find "${GITHUB_WORKSPACE}/debug" -maxdepth 3 -type d | sort
           
       - name: Create package
         if: false
@@ -172,16 +172,11 @@ jobs:
         continue-on-error: true
         run: |
           set +e
-
           extra_report="${GITHUB_WORKSPACE}/extra_suites_${GITHUB_RUN_NUMBER}.txt"
           mysql_test_dir="${GITHUB_WORKSPACE}/mysql-test"
-          export MTR_BINDIR="${GITHUB_WORKSPACE}/debug"
-
           extra_suites=(innodb_fts innodb_undo innodb_gis innodb_zip)
           rm -rf /dev/shm/var_auto_* || true
-
           cd "${mysql_test_dir}"
-
           perl mysql-test-run.pl \
             --force \
             --mem \
