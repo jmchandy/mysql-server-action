@@ -55,7 +55,7 @@ jobs:
           enable_hypergraph=false
           build_debug_tree=false
           enable_ndb=false
-          enable_extra_mtr=false
+          enable_extra_mtr=true
   
           if (( ${#changed_files[@]} > 0 )); then
             if printf '%s\n' "${changed_files[@]}" | grep -Eq "$hypergraph_re"; then
