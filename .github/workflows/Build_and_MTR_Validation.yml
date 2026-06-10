@@ -148,6 +148,7 @@ jobs:
             --mem \
             --retry-failure=2 \
             --retry=2 \
+            --max-test-fail=0 \
             --report-unstable-tests \
             --clean-vardir \
             --parallel "$(nproc)" \
@@ -182,6 +183,7 @@ jobs:
             --mem \
             --retry-failure=2 \
             --retry=2 \
+            --max-test-fail=0 \
             --report-unstable-tests \
             --clean-vardir \
             --parallel "$(nproc)" \
@@ -209,6 +211,7 @@ jobs:
             --mem \
             --retry-failure=2 \
             --retry=2 \
+            --max-test-fail=0 \
             --report-unstable-tests \
             --clean-vardir \
             --parallel "$(nproc)" \
@@ -235,6 +238,7 @@ jobs:
             --mem \
             --retry-failure=2 \
             --retry=2 \
+            --max-test-fail=0 \
             --report-unstable-tests \
             --clean-vardir \
             --xml-report="${debug_xml_report}" \
@@ -260,6 +264,7 @@ jobs:
             --mem \
             --retry-failure=2 \
             --retry=2 \
+            --max-test-fail=0 \
             --report-unstable-tests \
             --clean-vardir \
             --xml-report="${repl_report}" \
@@ -279,6 +284,87 @@ jobs:
             [ -e "$f" ] || continue
             xmllint --noout "$f"
           done
+
+      - name: Publish MTR Summary
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          emit_stage() {
+            local title="$1"
+            local enabled="$2"
+            local report="$3"
+            local log="${4:-}"
+            local content status total failed unstable line
+
+            if [[ "$enabled" != "true" ]]; then
+              echo ">> ${title}: Skipped"
+              echo "   Not enabled for this PR"
+              echo
+              return
+            fi
+
+            if [[ ! -f "$report" ]]; then
+              echo "X ${title}: Failed"
+              echo "   No summary report produced"
+              echo
+              return
+            fi
+
+            content="$(cat "$report")"
+
+            if grep -qi '^skipped$' <<<"$content"; then
+              echo ">> ${title}: Skipped"
+              echo "   Report says skipped"
+              echo
+              return
+            fi
+
+            status="Failed"
+            total=""
+            failed=""
+            unstable=""
+
+            if [[ "$content" =~ Completed:[[:space:]]*All[[:space:]]*([0-9]+)[[:space:]]*tests[[:space:]]*were[[:space:]]*successful\. ]]; then
+              total="${BASH_REMATCH[1]}"
+              failed="0"
+              status="Completed"
+            elif [[ "$content" =~ Failed[[:space:]]*([0-9]+)/([0-9]+)[[:space:]]*tests ]]; then
+              failed="${BASH_REMATCH[1]}"
+              total="${BASH_REMATCH[2]}"
+            elif [[ -n "$log" && -f "$log" ]]; then
+              line="$(grep -Eo 'Failed[[:space:]]*[0-9]+/[0-9]+[[:space:]]*tests' "$log" | tail -n 1 || true)"
+              if [[ "$line" =~ Failed[[:space:]]*([0-9]+)/([0-9]+)[[:space:]]*tests ]]; then
+                failed="${BASH_REMATCH[1]}"
+                total="${BASH_REMATCH[2]}"
+              fi
+            fi
+
+            unstable="$(grep -Eo 'Unstable[^0-9]*[0-9]+' <<<"$content" | tail -n 1 | grep -Eo '[0-9]+' | tail -n 1 || true)"
+
+            if [[ "$status" == "Completed" ]]; then
+              echo "* ${title}: Completed"
+            else
+              echo "X ${title}: Failed"
+            fi
+
+            [[ -n "$total" ]] && echo "   Total tests: ${total}"
+            [[ -n "$failed" ]] && echo "   Failed: ${failed}"
+            [[ -n "$unstable" ]] && echo "   Unstable: ${unstable}"
+            echo
+          }
+
+          {
+            echo "## Linux Test Summary"
+            echo
+
+            emit_stage "Main MTR" "true" "${GITHUB_WORKSPACE}/build-error_main_${GITHUB_RUN_NUMBER}.txt"
+            emit_stage "Hypergraph MTR" "${{ steps.diff.outputs.enable_hypergraph }}" "${GITHUB_WORKSPACE}/hypergraph_${GITHUB_RUN_NUMBER}.txt"
+            emit_stage "Additional InnoDB MTR" "${{ steps.diff.outputs.enable_extra_mtr }}" "${GITHUB_WORKSPACE}/extra_suites_${GITHUB_RUN_NUMBER}.txt"
+            emit_stage "Debug MTR" "${{ steps.diff.outputs.build_debug_tree }}" "${GITHUB_WORKSPACE}/build-error_debug_${GITHUB_RUN_NUMBER}.txt" "${GITHUB_WORKSPACE}/mtr_${GITHUB_RUN_NUMBER}.err"
+            emit_stage "Replication MTR" "true" "${GITHUB_WORKSPACE}/build-error_replication_${GITHUB_RUN_NUMBER}.txt"
+          } >> "$GITHUB_STEP_SUMMARY"  
           
       - name: Artifact Organization
         if: always()
@@ -318,7 +404,7 @@ jobs:
         with:
           name: mysql-ci-artifacts
           if-no-files-found: ignore
-          path: artifacts/
+          path: artifacts/   
           
   windows-workflow:
     runs-on: windows-latest
@@ -445,6 +531,7 @@ jobs:
               --force `
               --retry-failure=2 `
               --retry=2 `
+              --max-test-fail=0 `
               --report-unstable-tests `
               --clean-vardir `
               --xml-report="$xmlReport" `
@@ -459,6 +546,7 @@ jobs:
               --force `
               --retry-failure=2 `
               --retry=2 `
+              --max-test-fail=0 `
               --report-unstable-tests `
               --clean-vardir `
               --xml-report="$xmlReport" `
@@ -467,6 +555,100 @@ jobs:
               1st `
               2>&1 | Tee-Object -FilePath $errLog
           }
+
+      - name: Publish MTR Summary
+        if: always()
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $root = $env:GITHUB_WORKSPACE
+          $reportPath = Join-Path $root ("build-error_main_{0}.txt" -f $env:GITHUB_RUN_NUMBER)
+          $logPath = Join-Path $root ("mtr_{0}.err" -f $env:GITHUB_RUN_NUMBER)
+
+          function Get-MtrStageText {
+            param(
+              [string]$Title,
+              [string]$ReportPath,
+              [string]$LogPath,
+              [bool]$Enabled = $true
+            )
+
+            if (-not $Enabled) {
+              return @(
+                ">> $Title: Skipped"
+                "   Not enabled for this PR"
+                ""
+              )
+            }
+
+            if (-not (Test-Path $ReportPath)) {
+              return @(
+                "X $Title: Failed"
+                "   No summary report produced"
+                ""
+              )
+            }
+
+            $content = Get-Content $ReportPath -Raw -ErrorAction SilentlyContinue
+            if ([string]::IsNullOrWhiteSpace($content)) {
+              return @(
+                "X $Title: Failed"
+                "   Empty summary report"
+                ""
+              )
+            }
+
+            if ($content -match '^\s*skipped\s*$') {
+              return @(
+                ">> $Title: Skipped"
+                "   Report says skipped"
+                ""
+              )
+            }
+
+            $status = 'Failed'
+            $total = $null
+            $failed = $null
+            $unstable = $null
+
+            if ($content -match 'Completed:\s*All\s*(\d+)\s*tests\s*were\s*successful\.') {
+              $status = 'Completed'
+              $total = $Matches[1]
+              $failed = 0
+            }
+            elseif ($content -match 'Failed\s*(\d+)\/(\d+)\s*tests') {
+              $failed = $Matches[1]
+              $total = $Matches[2]
+            }
+            elseif (Test-Path $LogPath) {
+              $logContent = Get-Content $LogPath -Raw -ErrorAction SilentlyContinue
+              if ($logContent -match 'Failed\s*(\d+)\/(\d+)\s*tests') {
+                $failed = $Matches[1]
+                $total = $Matches[2]
+              }
+            }
+
+            $unstableMatch = [regex]::Match($content, 'Unstable[^0-9]*(\d+)')
+            if ($unstableMatch.Success) {
+              $unstable = $unstableMatch.Groups[1].Value
+            }
+
+            $icon = if ($status -eq 'Completed') { '*' } else { 'X' }
+            $lines = @("$icon $Title: $status")
+            if ($null -ne $total) { $lines += "   Total tests: $total" }
+            if ($null -ne $failed) { $lines += "   Failed: $failed" }
+            if ($null -ne $unstable) { $lines += "   Unstable: $unstable" }
+            $lines += ""
+            return $lines
+          }
+
+          $summaryLines = @()
+          $summaryLines += "## Windows Test Summary"
+          $summaryLines += ""
+          $summaryLines += Get-MtrStageText -Title 'Main MTR' -ReportPath $reportPath -LogPath $logPath
+
+          $summaryLines | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8
           
       - name: Artifact Organization
         if: always()
