@@ -566,25 +566,19 @@ jobs:
           $reportPath = Join-Path $root ("build-error_main_{0}.txt" -f $env:GITHUB_RUN_NUMBER)
           $logPath = Join-Path $root ("mtr_{0}.err" -f $env:GITHUB_RUN_NUMBER)
 
-          function Get-MtrStageText {
+          $suiteLabel = if ("${{ steps.diff.outputs.enable_innodb_mtr }}" -eq "true") { "innodb" } else { "1st" }
+
+          function Get-MtrBlock {
             param(
               [string]$Title,
+              [string]$Suite,
               [string]$ReportPath,
-              [string]$LogPath,
-              [bool]$Enabled = $true
+              [string]$LogPath
             )
-
-            if (-not $Enabled) {
-              return @(
-                ">> $Title: Skipped"
-                "   Not enabled for this PR"
-                ""
-              )
-            }
 
             if (-not (Test-Path $ReportPath)) {
               return @(
-                "X $Title: Failed"
+                "X $Title ($Suite): Failed"
                 "   No summary report produced"
                 ""
               )
@@ -593,7 +587,7 @@ jobs:
             $content = Get-Content $ReportPath -Raw -ErrorAction SilentlyContinue
             if ([string]::IsNullOrWhiteSpace($content)) {
               return @(
-                "X $Title: Failed"
+                "X $Title ($Suite): Failed"
                 "   Empty summary report"
                 ""
               )
@@ -601,7 +595,7 @@ jobs:
 
             if ($content -match '^\s*skipped\s*$') {
               return @(
-                ">> $Title: Skipped"
+                ">> $Title ($Suite): Skipped"
                 "   Report says skipped"
                 ""
               )
@@ -635,7 +629,7 @@ jobs:
             }
 
             $icon = if ($status -eq 'Completed') { '*' } else { 'X' }
-            $lines = @("$icon $Title: $status")
+            $lines = @("$icon $Title ($Suite): $status")
             if ($null -ne $total) { $lines += "   Total tests: $total" }
             if ($null -ne $failed) { $lines += "   Failed: $failed" }
             if ($null -ne $unstable) { $lines += "   Unstable: $unstable" }
@@ -643,10 +637,10 @@ jobs:
             return $lines
           }
 
-          $summaryLines = @()
-          $summaryLines += "## Windows Test Summary"
-          $summaryLines += ""
-          $summaryLines += Get-MtrStageText -Title 'Main MTR' -ReportPath $reportPath -LogPath $logPath
+          $summaryLines = New-Object System.Collections.Generic.List[string]
+          $summaryLines.Add("## Windows Test Summary")
+          $summaryLines.Add("")
+          $summaryLines.AddRange((Get-MtrBlock -Title 'MTR' -Suite $suiteLabel -ReportPath $reportPath -LogPath $logPath))
 
           $summaryLines | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8
           
