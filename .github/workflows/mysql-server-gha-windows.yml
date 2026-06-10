@@ -5,29 +5,31 @@ on:
     branches: [ "trunk" ]
 
 jobs:
-  windows-build:
+  windows-workflow:
     runs-on: windows-latest
 
     steps:
-      - name: Git setup
+      - name: Git Configuration
         shell: pwsh
         run: |
           git config --global core.autocrlf false
           git config --global core.eol lf
           git config --system core.longpaths true
           
-      - name: Checkout
+      - name: Repository Checkout
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
-      - name: Analyze changed files
+      - name: File-Change Analysis
         id: diff
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          
           $baseSha = '${{ github.event.pull_request.base.sha }}'
           $headSha = '${{ github.event.pull_request.head.sha }}'
+          
           $changedFiles = @(
             git diff --name-only $baseSha $headSha |
             Where-Object { $_ -and $_.Trim() }
@@ -39,6 +41,7 @@ jobs:
           else {
             $changedFiles | ForEach-Object { Write-Host $_ }
           }
+          
           $enable_innodb_mtr = $true
           if ($changedFiles.Count -gt 0) {
             if ($changedFiles | Where-Object { $_ -match '(^|/)(innodb|innobase)(/|$)' }) {
@@ -49,11 +52,12 @@ jobs:
             "enable_innodb_mtr=$enable_innodb_mtr"
           ) | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           
-      - name: Install OpenSSL
+      - name: OpenSSL Installation
         id: openssl
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          
           choco install openssl.light -y --no-progress
           $opensslDir = Get-ChildItem "C:\Program Files","C:\Program Files (x86)" -Directory -Filter "OpenSSL*" |
             Select-Object -First 1
@@ -65,10 +69,11 @@ jobs:
           & "$($opensslDir.FullName)\bin\openssl.exe" version
           "openssl_root=$opensslRoot" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           
-      - name: Install Bison
+      - name: Bison Installation
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          
           choco install winflexbison3 -y --no-progress
           where.exe win_bison
           win_bison --version
@@ -77,6 +82,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          
           if (Test-Path bld) { Remove-Item -Recurse -Force bld }
           New-Item -ItemType Directory -Path bld | Out-Null
           Set-Location bld
@@ -91,23 +97,27 @@ jobs:
           & $cmake @args
           & $cmake --build . -- /m
           
-      - name: Create package
+      - name: Package Generation
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          
           Set-Location bld
           & 'C:\Program Files\CMake\bin\cmake.exe' --build . --target package -- /m
           
-      - name: Run MTR
+      - name: MTR Validation
+        id: mtr
         shell: pwsh
         continue-on-error: true
         run: |
           $ErrorActionPreference = 'Stop'
+          
           $mysqlTestDir = Join-Path $env:GITHUB_WORKSPACE 'bld\mysql-test'
           $vardir = Join-Path $env:RUNNER_TEMP 'var-dir'
           $summaryReport = Join-Path $env:GITHUB_WORKSPACE ("build-error_main_{0}.txt" -f $env:GITHUB_RUN_NUMBER)
           $xmlReport = Join-Path $env:GITHUB_WORKSPACE ("mtr_{0}.xml" -f $env:GITHUB_RUN_NUMBER)
           $errLog = Join-Path $env:GITHUB_WORKSPACE ("mtr_{0}.err" -f $env:GITHUB_RUN_NUMBER)
+          
           if (Test-Path $vardir) {
             Remove-Item -Recurse -Force $vardir
           }
@@ -119,6 +129,7 @@ jobs:
               --force `
               --retry-failure=2 `
               --retry=2 `
+              --max-test-fail=0 `
               --report-unstable-tests `
               --clean-vardir `
               --xml-report="$xmlReport" `
@@ -133,6 +144,7 @@ jobs:
               --force `
               --retry-failure=2 `
               --retry=2 `
+              --max-test-fail=0 `
               --report-unstable-tests `
               --clean-vardir `
               --xml-report="$xmlReport" `
@@ -141,12 +153,88 @@ jobs:
               1st `
               2>&1 | Tee-Object -FilePath $errLog
           }
-          
-      - name: Organize artifacts
+      - name: Publish MTR Summary
         if: always()
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          $root = $env:GITHUB_WORKSPACE
+          $reportPath = Join-Path $root ("build-error_main_{0}.txt" -f $env:GITHUB_RUN_NUMBER)
+          $logPath = Join-Path $root ("mtr_{0}.err" -f $env:GITHUB_RUN_NUMBER)
+          $suiteLabel = if ("${{ steps.diff.outputs.enable_innodb_mtr }}" -eq "true") { "innodb" } else { "1st" }
+          function Get-MtrBlock {
+            param(
+              [string]$Title,
+              [string]$Suite,
+              [string]$ReportPath,
+              [string]$LogPath
+            )
+            if (-not (Test-Path $ReportPath)) {
+              return @(
+                "X $Title ($Suite): Failed"
+                "   No summary report produced"
+                ""
+              )
+            }
+            $content = Get-Content $ReportPath -Raw -ErrorAction SilentlyContinue
+            if ([string]::IsNullOrWhiteSpace($content)) {
+              return @(
+                "X $Title ($Suite): Failed"
+                "   Empty summary report"
+                ""
+              )
+            }
+            if ($content -match '^\s*skipped\s*$') {
+              return @(
+                ">> $Title ($Suite): Skipped"
+                "   Report says skipped"
+                ""
+              )
+            }
+            $status = 'Failed'
+            $total = $null
+            $failed = $null
+            $unstable = $null
+            if ($content -match 'Completed:\s*All\s*(\d+)\s*tests\s*were\s*successful\.') {
+              $status = 'Completed'
+              $total = $Matches[1]
+              $failed = 0
+            }
+            elseif ($content -match 'Failed\s*(\d+)\/(\d+)\s*tests') {
+              $failed = $Matches[1]
+              $total = $Matches[2]
+            }
+            elseif (Test-Path $LogPath) {
+              $logContent = Get-Content $LogPath -Raw -ErrorAction SilentlyContinue
+              if ($logContent -match 'Failed\s*(\d+)\/(\d+)\s*tests') {
+                $failed = $Matches[1]
+                $total = $Matches[2]
+              }
+            }
+            $unstableMatch = [regex]::Match($content, 'Unstable[^0-9]*(\d+)')
+            if ($unstableMatch.Success) {
+              $unstable = $unstableMatch.Groups[1].Value
+            }
+            $icon = if ($status -eq 'Completed') { '*' } else { 'X' }
+            $lines = @("$icon $Title ($Suite): $status")
+            if ($null -ne $total) { $lines += "   Total tests: $total" }
+            if ($null -ne $failed) { $lines += "   Failed: $failed" }
+            if ($null -ne $unstable) { $lines += "   Unstable: $unstable" }
+            $lines += ""
+            return $lines
+          }
+          $summaryLines = New-Object System.Collections.Generic.List[string]
+          $summaryLines.Add("## Windows Test Summary")
+          $summaryLines.Add("")
+          $summaryLines.AddRange((Get-MtrBlock -Title 'MTR' -Suite $suiteLabel -ReportPath $reportPath -LogPath $logPath))
+          $summaryLines | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8
+          
+      - name: Artifact Organization
+        if: always()
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          
           Remove-Item -Recurse -Force artifacts -ErrorAction SilentlyContinue
           New-Item -ItemType Directory -Force -Path `
             artifacts/test-reports, `
@@ -171,7 +259,7 @@ jobs:
           Get-ChildItem -Path (Join-Path $root 'bld') -Recurse -File -Include *.tar.gz, *.tgz, *.zip -ErrorAction SilentlyContinue |
             Copy-Item -Destination artifacts/packages -Force
             
-      - name: Upload artifacts
+      - name: Artifact Upload
         if: always()
         uses: actions/upload-artifact@v7
         with:
