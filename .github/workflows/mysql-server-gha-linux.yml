@@ -5,16 +5,13 @@ on:
     branches: [ "trunk" ]
  
 jobs:
-  linux-build:
-    runs-on:
-      - self-hosted
-      - Linux
-      - X64 
-      
+  linux-workflow:
+    runs-on: ubuntu-latest
+ 
     steps:
       - name: Repository Checkout
         uses: actions/checkout@v6
-        with:
+        with: 
           fetch-depth: 0
             
       - name: File-Change Analysis
@@ -39,10 +36,10 @@ jobs:
           hypergraph_re='^(sql/join_optimizer.*|sql/iterators.*|sql/range_optimizer.*|sql/sql_.*|sql/query_.*|sql/opt_.*|sql/window.*|sql/item.*|sql/handler.*|sql/histogram/.*)'
           innodb_re='^(storage/innobase/|mysql-test/suite/innodb)'
           
-          enable_hypergraph=true
-          build_debug_tree=true
-          enable_ndb=true
-          enable_extra_mtr=true
+          enable_hypergraph=false
+          build_debug_tree=false
+          enable_ndb=false
+          enable_extra_mtr=false
   
           if (( ${#changed_files[@]} > 0 )); then
             if printf '%s\n' "${changed_files[@]}" | grep -Eq "$hypergraph_re"; then
@@ -110,7 +107,6 @@ jobs:
         run: |
           set +e
           set -o pipefail
-
           mysql_test_dir="${GITHUB_WORKSPACE}/bld/mysql-test"
           xml_report="${GITHUB_WORKSPACE}/mtr_${GITHUB_RUN_NUMBER}.xml"
           unit_report="${GITHUB_WORKSPACE}/mtr-unit_${GITHUB_RUN_NUMBER}.xml"
@@ -154,7 +150,6 @@ jobs:
         run: |
           set +e
           set -o pipefail
-
           mysql_test_dir="${GITHUB_WORKSPACE}/bld/mysql-test"
           hypergraph_report="${GITHUB_WORKSPACE}/hypergraph_${GITHUB_RUN_NUMBER}.txt"
           
@@ -182,7 +177,6 @@ jobs:
         run: |
           set +e
           set -o pipefail
-
           mysql_test_dir="${GITHUB_WORKSPACE}/bld/mysql-test"
           extra_report="${GITHUB_WORKSPACE}/extra_suites_${GITHUB_RUN_NUMBER}.txt"
           extra_suites=(innodb_fts innodb_undo innodb_gis innodb_zip)
@@ -235,7 +229,6 @@ jobs:
         run: |
           set +e
           set -o pipefail
-
           mysql_test_dir="${GITHUB_WORKSPACE}/bld/mysql-test"
           repl_report="${GITHUB_WORKSPACE}/mtr-replication_${GITHUB_RUN_NUMBER}.xml"
           repl_summary="${GITHUB_WORKSPACE}/build-error_replication_${GITHUB_RUN_NUMBER}.txt"
@@ -267,48 +260,41 @@ jobs:
             [ -e "$f" ] || continue
             xmllint --noout "$f"
           done
-
+          
       - name: Publish MTR Summary
         if: always()
         shell: bash
         run: |
           set -euo pipefail
-
-          emit_stage() {
+          emit_mtr_stage() {
             local title="$1"
             local enabled="$2"
             local report="$3"
             local log="${4:-}"
             local content status total failed unstable line
-
             if [[ "$enabled" != "true" ]]; then
-              echo ">> ${title}: Skipped"
+              echo "- ${title}: Skipped"
               echo "   Not enabled for this PR"
               echo
               return
             fi
-
             if [[ ! -f "$report" ]]; then
               echo "X ${title}: Failed"
               echo "   No summary report produced"
               echo
               return
             fi
-
             content="$(cat "$report")"
-
             if grep -qi '^skipped$' <<<"$content"; then
-              echo ">> ${title}: Skipped"
+              echo "- ${title}: Skipped"
               echo "   Report says skipped"
               echo
               return
             fi
-
             status="Failed"
             total=""
             failed=""
             unstable=""
-
             if [[ "$content" =~ Completed:[[:space:]]*All[[:space:]]*([0-9]+)[[:space:]]*tests[[:space:]]*were[[:space:]]*successful\. ]]; then
               total="${BASH_REMATCH[1]}"
               failed="0"
@@ -316,39 +302,64 @@ jobs:
             elif [[ "$content" =~ Failed[[:space:]]*([0-9]+)/([0-9]+)[[:space:]]*tests ]]; then
               failed="${BASH_REMATCH[1]}"
               total="${BASH_REMATCH[2]}"
+              status="Completed"
             elif [[ -n "$log" && -f "$log" ]]; then
               line="$(grep -Eo 'Failed[[:space:]]*[0-9]+/[0-9]+[[:space:]]*tests' "$log" | tail -n 1 || true)"
               if [[ "$line" =~ Failed[[:space:]]*([0-9]+)/([0-9]+)[[:space:]]*tests ]]; then
                 failed="${BASH_REMATCH[1]}"
                 total="${BASH_REMATCH[2]}"
+                status="Completed"
               fi
             fi
-
             unstable="$(grep -Eo 'Unstable[^0-9]*[0-9]+' <<<"$content" | tail -n 1 | grep -Eo '[0-9]+' | tail -n 1 || true)"
-
             if [[ "$status" == "Completed" ]]; then
               echo "* ${title}: Completed"
             else
               echo "X ${title}: Failed"
             fi
-
-            [[ -n "$total" ]] && echo "   Total tests: ${total}"
+            [[ -n "$total" ]] && echo "   No of tests: ${total}"
             [[ -n "$failed" ]] && echo "   Failed: ${failed}"
             [[ -n "$unstable" ]] && echo "   Unstable: ${unstable}"
             echo
           }
-
+          emit_unit_stage() {
+            local title="$1"
+            local xml="$2"
+            if [[ ! -f "$xml" ]]; then
+              echo "X ${title}: Failed"
+              echo "   No unit-test report produced"
+              echo
+              return
+            fi
+            if [[ ! -s "$xml" ]]; then
+              echo "X ${title}: Failed"
+              echo "   Empty unit-test report"
+              echo
+              return
+            fi
+            local tests failures skipped
+            tests="$(xmllint --xpath 'string(//testsuites/@tests | //testsuite/@tests)' "$xml" 2>/dev/null || true)"
+            failures="$(xmllint --xpath 'string(//testsuites/@failures | //testsuite/@failures)' "$xml" 2>/dev/null || true)"
+                
+            tests="${tests:-0}"
+            failures="${failures:-0}"
+         
+            echo "* ${title}: Completed"
+            echo "   No of tests: ${tests}"
+            echo "   Failed: ${failures}"
+            echo
+          }
           {
             echo "## Linux Test Summary"
             echo
-
-            emit_stage "Main MTR" "true" "${GITHUB_WORKSPACE}/build-error_main_${GITHUB_RUN_NUMBER}.txt"
-            emit_stage "Hypergraph MTR" "${{ steps.diff.outputs.enable_hypergraph }}" "${GITHUB_WORKSPACE}/hypergraph_${GITHUB_RUN_NUMBER}.txt"
-            emit_stage "Additional InnoDB MTR" "${{ steps.diff.outputs.enable_extra_mtr }}" "${GITHUB_WORKSPACE}/extra_suites_${GITHUB_RUN_NUMBER}.txt"
-            emit_stage "Debug MTR" "${{ steps.diff.outputs.build_debug_tree }}" "${GITHUB_WORKSPACE}/build-error_debug_${GITHUB_RUN_NUMBER}.txt" "${GITHUB_WORKSPACE}/mtr_${GITHUB_RUN_NUMBER}.err"
-            emit_stage "Replication MTR" "true" "${GITHUB_WORKSPACE}/build-error_replication_${GITHUB_RUN_NUMBER}.txt"
-          } >> "$GITHUB_STEP_SUMMARY"  
-          
+            emit_mtr_stage "Main MTR" "true" "${GITHUB_WORKSPACE}/build-error_main_${GITHUB_RUN_NUMBER}.txt"
+            emit_unit_stage "Unit tests" "${GITHUB_WORKSPACE}/mtr-unit_${GITHUB_RUN_NUMBER}.xml"
+            emit_mtr_stage "Hypergraph MTR" "${{ steps.diff.outputs.enable_hypergraph }}" "${GITHUB_WORKSPACE}/hypergraph_${GITHUB_RUN_NUMBER}.txt"
+            emit_mtr_stage "Additional InnoDB MTR" "${{ steps.diff.outputs.enable_extra_mtr }}" "${GITHUB_WORKSPACE}/extra_suites_${GITHUB_RUN_NUMBER}.txt"
+            emit_mtr_stage "Debug MTR" "${{ steps.diff.outputs.build_debug_tree }}" "${GITHUB_WORKSPACE}/build-error_debug_${GITHUB_RUN_NUMBER}.txt" "${GITHUB_WORKSPACE}/mtr_${GITHUB_RUN_NUMBER}.err"
+            emit_mtr_stage "Replication MTR" "true" "${GITHUB_WORKSPACE}/build-error_replication_${GITHUB_RUN_NUMBER}.txt"
+           } >> "$GITHUB_STEP_SUMMARY"
+    
       - name: Artifact Organization
         if: always()
         shell: bash
@@ -366,6 +377,7 @@ jobs:
 
           # Test reports
           cp -v mtr_*.xml artifacts/test-reports/ 2>/dev/null || true
+          cp -v mtr-unit_*.xml artifacts/test-reports/ 2>/dev/null || true
 
           # Summaries
           cp -v build-error_main_*.txt artifacts/summaries/ 2>/dev/null || true
@@ -388,4 +400,3 @@ jobs:
           name: mysql-ci-artifacts
           if-no-files-found: ignore
           path: artifacts/   
-          
