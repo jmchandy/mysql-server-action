@@ -186,7 +186,7 @@ jobs:
             }
             if ($content -match '^\s*skipped\s*$') {
               return @(
-                ">> $Title ($Suite): Skipped"
+                "- $Title ($Suite): Skipped"
                 "   Report says skipped"
                 ""
               )
@@ -194,39 +194,37 @@ jobs:
             $status = 'Failed'
             $total = $null
             $failed = $null
-            $unstable = $null
             if ($content -match 'Completed:\s*All\s*(\d+)\s*tests\s*were\s*successful\.') {
               $status = 'Completed'
               $total = $Matches[1]
               $failed = 0
             }
             elseif ($content -match 'Failed\s*(\d+)\/(\d+)\s*tests') {
+                $status = 'Completed'
               $failed = $Matches[1]
               $total = $Matches[2]
             }
             elseif (Test-Path $LogPath) {
               $logContent = Get-Content $LogPath -Raw -ErrorAction SilentlyContinue
               if ($logContent -match 'Failed\s*(\d+)\/(\d+)\s*tests') {
+                $status = 'Completed'
                 $failed = $Matches[1]
                 $total = $Matches[2]
               }
             }
-            $unstableMatch = [regex]::Match($content, 'Unstable[^0-9]*(\d+)')
-            if ($unstableMatch.Success) {
-              $unstable = $unstableMatch.Groups[1].Value
-            }
             $icon = if ($status -eq 'Completed') { '*' } else { 'X' }
             $lines = @("$icon $Title ($Suite): $status")
-            if ($null -ne $total) { $lines += "   Total tests: $total" }
+            if ($null -ne $total) { $lines += "   No of tests: $total" }
             if ($null -ne $failed) { $lines += "   Failed: $failed" }
-            if ($null -ne $unstable) { $lines += "   Unstable: $unstable" }
             $lines += ""
             return $lines
           }
           $summaryLines = New-Object System.Collections.Generic.List[string]
           $summaryLines.Add("## Windows Test Summary")
           $summaryLines.Add("")
-          $summaryLines.AddRange((Get-MtrBlock -Title 'MTR' -Suite $suiteLabel -ReportPath $reportPath -LogPath $logPath))
+          foreach ($line in (Get-MtrBlock -Title 'Main MTR' -Suite $suiteLabel -ReportPath $reportPath -LogPath $logPath)) {
+            [void]$summaryLines.Add($line)
+          }
           $summaryLines | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8
           
       - name: Artifact Organization
