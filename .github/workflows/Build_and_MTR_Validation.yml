@@ -14,93 +14,6 @@ jobs:
         with: 
           fetch-depth: 0
 
-      - name: Linux cleanup helper
-        shell: bash
-        run: |
-          cat > "${RUNNER_TEMP}/mysql-ci-cleanup.sh" <<'BASH'
-          #!/usr/bin/env bash
-          set -euo pipefail
-
-          mode="${1:-mtr}"
-          tree="${2:-bld}"
-          WORK="${GITHUB_WORKSPACE:-$PWD}"
-          TEMP="${RUNNER_TEMP:-/tmp}"
-
-          echo "== MySQL CI cleanup: mode=${mode}, tree=${tree}, time=$(date -u '+%Y-%m-%dT%H:%M:%SZ') =="
-
-          # MTR commonly uses /dev/shm when --mem is enabled.
-          rm -rf /dev/shm/var_auto_* || true
-
-          # Stop any MySQL server left behind by a previous failed MTR invocation.
-          if pgrep -x mysqld >/dev/null 2>&1; then
-            echo "Stopping stray mysqld processes"
-            pkill -TERM mysqld || true
-
-            for i in 1 2 3 4 5; do
-              if ! pgrep -x mysqld >/dev/null 2>&1; then
-                break
-              fi
-              sleep 1
-            done
-
-            if pgrep -x mysqld >/dev/null 2>&1; then
-              echo "Force-killing remaining mysqld processes"
-              pkill -9 mysqld || true
-            fi
-          fi
-
-          # Remove stale pid files and sockets from known volatile locations.
-          for root in \
-            "$WORK/bld/mysql-test/var" \
-            "$WORK/debug/mysql-test/var" \
-            "$TEMP/var-dir"
-          do
-            if [ -e "$root" ]; then
-              find "$root" -type f -name '*.pid' -delete 2>/dev/null || true
-              find "$root" -type s -name 'mysql*.sock' -delete 2>/dev/null || true
-              find "$root" -type s -name 'mysqld*.sock' -delete 2>/dev/null || true
-            fi
-          done
-
-          rm -f /tmp/mysql.sock /tmp/mysqld.sock /tmp/mysqlx.sock || true
-
-          case "$mode" in
-            prebuild)
-              # Safe only before compilation.
-              rm -rf "$WORK/bld" "$WORK/debug" "$TEMP/var-dir" || true
-              ;;
-
-            mtr)
-              # Safe before an MTR run. Do not remove runtime_output_directory.
-              rm -rf "$WORK/$tree/mysql-test/var" || true
-              rm -rf "$TEMP/var-dir" || true
-              ;;
-
-            *)
-              echo "Unknown cleanup mode: $mode" >&2
-              exit 2
-              ;;
-          esac
-
-          sync || true
-          sleep 1
-
-          echo "== Disk after cleanup =="
-          df -h "$WORK" || true
-
-          echo "== Memory after cleanup =="
-          free -h || true
-
-          echo "== Cleanup done =="
-          BASH
-
-          chmod +x "${RUNNER_TEMP}/mysql-ci-cleanup.sh"
-
-      - name: Pre-build cleanup
-        shell: bash
-        run: |
-          "${RUNNER_TEMP}/mysql-ci-cleanup.sh" prebuild bld
-
       - name: Dependency Installation
         run: |
           sudo apt-get update
@@ -218,8 +131,6 @@ jobs:
           xml_report="${GITHUB_WORKSPACE}/mtr_${GITHUB_RUN_NUMBER}.xml"
           unit_report="${GITHUB_WORKSPACE}/mtr-unit_${GITHUB_RUN_NUMBER}.xml"
           summary_report="${GITHUB_WORKSPACE}/build-error_main_${GITHUB_RUN_NUMBER}.txt"
-
-          "${RUNNER_TEMP}/mysql-ci-cleanup.sh" mtr bld
           
           if [ ! -d "${mysql_test_dir}" ]; then
             touch "${xml_report}"
@@ -228,6 +139,7 @@ jobs:
             exit 0
           fi
           
+          rm -rf /dev/shm/var_auto_*
           cd "${mysql_test_dir}"
           perl mysql-test-run.pl \
             --nounit-tests \
@@ -261,8 +173,7 @@ jobs:
           mysql_test_dir="${GITHUB_WORKSPACE}/bld/mysql-test"
           hypergraph_report="${GITHUB_WORKSPACE}/hypergraph_${GITHUB_RUN_NUMBER}.txt"
           
-          "${RUNNER_TEMP}/mysql-ci-cleanup.sh" mtr bld
-          
+          rm -rf /dev/shm/var_auto_* || true
           cd "${mysql_test_dir}"
           perl mysql-test-run.pl \
             --nounit-tests \
@@ -290,8 +201,7 @@ jobs:
           extra_report="${GITHUB_WORKSPACE}/extra_suites_${GITHUB_RUN_NUMBER}.txt"
           extra_suites=(innodb_fts innodb_undo innodb_gis innodb_zip)
           
-          "${RUNNER_TEMP}/mysql-ci-cleanup.sh" mtr bld
-          
+          rm -rf /dev/shm/var_auto_* || true
           cd "${mysql_test_dir}"
           perl mysql-test-run.pl \
             --force \
@@ -318,8 +228,7 @@ jobs:
           debug_summary_report="${GITHUB_WORKSPACE}/build-error_debug_${GITHUB_RUN_NUMBER}.txt"
           debug_err_log="${GITHUB_WORKSPACE}/mtr_${GITHUB_RUN_NUMBER}.err"
           
-          "${RUNNER_TEMP}/mysql-ci-cleanup.sh" mtr debug
-          
+          rm -rf /dev/shm/var_auto_*
           cd "${debug_test_dir}"
           perl mysql-test-run.pl \
             --force \
@@ -344,8 +253,7 @@ jobs:
           repl_report="${GITHUB_WORKSPACE}/mtr-replication_${GITHUB_RUN_NUMBER}.xml"
           repl_summary="${GITHUB_WORKSPACE}/build-error_replication_${GITHUB_RUN_NUMBER}.txt"
           
-          "${RUNNER_TEMP}/mysql-ci-cleanup.sh" mtr bld
-          
+          rm -rf /dev/shm/var_auto_* || true
           cd "${mysql_test_dir}"
           perl mysql-test-run.pl \
             --force \
@@ -378,41 +286,34 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
           emit_mtr_stage() {
             local title="$1"
             local enabled="$2"
             local report="$3"
             local log="${4:-}"
             local content status total failed line
-
             if [[ "$enabled" != "true" ]]; then
               echo "- ${title}: Skipped"
               echo "   Not enabled for this PR"
               echo
               return
             fi
-
             if [[ ! -f "$report" ]]; then
               echo "X ${title}: Failed"
               echo "   No summary report produced"
               echo
               return
             fi
-
             content="$(cat "$report")"
-
             if grep -qi '^skipped$' <<<"$content"; then
               echo "- ${title}: Skipped"
               echo "   Report says skipped"
               echo
               return
             fi
-
             status="Failed"
             total=""
             failed=""
-
             if [[ "$content" =~ Completed:[[:space:]]*All[[:space:]]*([0-9]+)[[:space:]]*tests[[:space:]]*were[[:space:]]*successful\. ]]; then
               total="${BASH_REMATCH[1]}"
               failed="0"
@@ -429,7 +330,6 @@ jobs:
                 status="Completed"
               fi
             fi
-
             if [[ "$status" == "Completed" ]]; then
               echo "* ${title}: Completed"
             else
@@ -439,27 +339,22 @@ jobs:
             [[ -n "$failed" ]] && echo "   Failed: ${failed}"
             echo
           }
-
           emit_unit_stage() {
             local title="$1"
             local xml="$2"
-
             if [[ ! -f "$xml" ]]; then
               echo "X ${title}: Failed"
               echo "   No unit-test report produced"
               echo
               return
             fi
-
             if [[ ! -s "$xml" ]]; then
               echo "X ${title}: Failed"
               echo "   Empty unit-test report"
               echo
               return
             fi
-
             local tests failures skipped
-
             tests="$(xmllint --xpath 'string(//testsuites/@tests | //testsuite/@tests)' "$xml" 2>/dev/null || true)"
             failures="$(xmllint --xpath 'string(//testsuites/@failures | //testsuite/@failures)' "$xml" 2>/dev/null || true)"
                 
@@ -471,7 +366,6 @@ jobs:
             echo "   Failed: ${failures}"
             echo
           }
-
           {
             echo "## Linux Test Summary"
             echo
@@ -637,37 +531,11 @@ jobs:
           $xmlReport = Join-Path $env:GITHUB_WORKSPACE ("mtr_{0}.xml" -f $env:GITHUB_RUN_NUMBER)
           $errLog = Join-Path $env:GITHUB_WORKSPACE ("mtr_{0}.err" -f $env:GITHUB_RUN_NUMBER)
           
-          Write-Host "== Windows MTR pre-cleanup =="
-
-          Get-Process -Name mysqld,mysqld-debug,mysqltest -ErrorAction SilentlyContinue |
-            Stop-Process -Force -ErrorAction SilentlyContinue
-
-          Start-Sleep -Seconds 1
-
-          $cleanupPaths = @(
-            $vardir,
-            (Join-Path $mysqlTestDir 'var'),
-            (Join-Path $env:RUNNER_TEMP 'var_auto_*')
-          )
-
-          foreach ($path in $cleanupPaths) {
-            Remove-Item -Path $path -Recurse -Force -ErrorAction SilentlyContinue
+          if (Test-Path $vardir) {
+            Remove-Item -Recurse -Force $vardir
           }
-
-          $socketPaths = @(
-            (Join-Path $env:TEMP 'mysql.sock'),
-            (Join-Path $env:TEMP 'mysqld.sock'),
-            (Join-Path $env:RUNNER_TEMP 'mysql.sock'),
-            (Join-Path $env:RUNNER_TEMP 'mysqld.sock')
-          )
-
-          foreach ($path in $socketPaths) {
-            Remove-Item -Path $path -Force -ErrorAction SilentlyContinue
-          }
-
-          New-Item -ItemType Directory -Path $vardir -Force | Out-Null
+          New-Item -ItemType Directory -Path $vardir | Out-Null
           Set-Location $mysqlTestDir
-          
           if ("${{ steps.diff.outputs.enable_innodb_mtr }}" -eq "true") {
             perl mysql-test-run.pl `
               --vardir="$vardir" `
@@ -698,18 +566,15 @@ jobs:
               1st `
               2>&1 | Tee-Object -FilePath $errLog
           }
-
       - name: Publish MTR Summary
         if: always()
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-
           $root = $env:GITHUB_WORKSPACE
           $reportPath = Join-Path $root ("build-error_main_{0}.txt" -f $env:GITHUB_RUN_NUMBER)
           $logPath = Join-Path $root ("mtr_{0}.err" -f $env:GITHUB_RUN_NUMBER)
           $suiteLabel = if ("${{ steps.diff.outputs.enable_innodb_mtr }}" -eq "true") { "innodb" } else { "1st" }
-
           function Get-MtrBlock {
             param(
               [string]$Title,
@@ -717,7 +582,6 @@ jobs:
               [string]$ReportPath,
               [string]$LogPath
             )
-
             if (-not (Test-Path $ReportPath)) {
               return @(
                 "X $Title ($Suite): Failed"
@@ -725,7 +589,6 @@ jobs:
                 ""
               )
             }
-
             $content = Get-Content $ReportPath -Raw -ErrorAction SilentlyContinue
             if ([string]::IsNullOrWhiteSpace($content)) {
               return @(
@@ -734,7 +597,6 @@ jobs:
                 ""
               )
             }
-
             if ($content -match '^\s*skipped\s*$') {
               return @(
                 "- $Title ($Suite): Skipped"
@@ -742,11 +604,9 @@ jobs:
                 ""
               )
             }
-
             $status = 'Failed'
             $total = $null
             $failed = $null
-
             if ($content -match 'Completed:\s*All\s*(\d+)\s*tests\s*were\s*successful\.') {
               $status = 'Completed'
               $total = $Matches[1]
@@ -765,7 +625,6 @@ jobs:
                 $total = $Matches[2]
               }
             }
-
             $icon = if ($status -eq 'Completed') { '*' } else { 'X' }
             $lines = @("$icon $Title ($Suite): $status")
             if ($null -ne $total) { $lines += "   No of tests: $total" }
@@ -773,14 +632,12 @@ jobs:
             $lines += ""
             return $lines
           }
-
           $summaryLines = New-Object System.Collections.Generic.List[string]
           $summaryLines.Add("## Windows Test Summary")
           $summaryLines.Add("")
           foreach ($line in (Get-MtrBlock -Title 'Main MTR' -Suite $suiteLabel -ReportPath $reportPath -LogPath $logPath)) {
             [void]$summaryLines.Add($line)
           }
-
           $summaryLines | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8
           
       - name: Artifact Organization
@@ -833,13 +690,11 @@ jobs:
       pull-requests: write
 
     steps:
-      - name: Repository Checkout
-        uses: actions/checkout@v6
-       
       - name: Merge PR
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh pr merge ${{ github.event.pull_request.number }} \
+            --repo "${{ github.repository }}" \
             --merge \
             --delete-branch
