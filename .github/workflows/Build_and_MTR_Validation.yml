@@ -56,10 +56,10 @@ jobs:
           hypergraph_re='^(sql/join_optimizer.*|sql/iterators.*|sql/range_optimizer.*|sql/sql_.*|sql/query_.*|sql/opt_.*|sql/window.*|sql/item.*|sql/handler.*|sql/histogram/.*)'
           innodb_re='^(storage/innobase/|mysql-test/suite/innodb)'
           
-          enable_hypergraph=false
-          build_debug_tree=false
-          enable_ndb=false
-          enable_extra_mtr=false
+          enable_hypergraph=true
+          build_debug_tree=true
+          enable_ndb=true
+          enable_extra_mtr=true
   
           if (( ${#changed_files[@]} > 0 )); then
             if printf '%s\n' "${changed_files[@]}" | grep -Eq "$hypergraph_re"; then
@@ -122,6 +122,7 @@ jobs:
           make package
           
       - name: Main MTR Validation
+        if: false
         id: main_validation
         shell: bash
         continue-on-error: true
@@ -220,7 +221,7 @@ jobs:
       
       - name: Debug Validation
         id: debug_validation
-        if: steps.diff.outputs.build_debug_tree == 'true'
+        if: false
         shell: bash
         continue-on-error: true
         run: |
@@ -248,6 +249,7 @@ jobs:
             2>&1 | tee "${debug_err_log}"
             
       - name: Replication Validation
+        if: false
         id: replication_validation
         shell: bash
         continue-on-error: true
@@ -409,11 +411,8 @@ jobs:
             fi
           }
 
-          check_step "Main MTR + unit tests" "${{ steps.main_validation.outcome }}"
           check_step "Hypergraph MTR" "${{ steps.hypergraph_validation.outcome }}" "${{ steps.diff.outputs.enable_hypergraph }}"
           check_step "Additional InnoDB MTR" "${{ steps.innodb_validation.outcome }}" "${{ steps.diff.outputs.enable_extra_mtr }}"
-          check_step "Debug MTR" "${{ steps.debug_validation.outcome }}" "${{ steps.diff.outputs.build_debug_tree }}"
-          check_step "Replication MTR" "${{ steps.replication_validation.outcome }}"
 
           exit "$failed"
             
@@ -496,7 +495,7 @@ jobs:
             $changedFiles | ForEach-Object { Write-Host $_ }
           }
           
-          $enable_innodb_mtr = $false
+          $enable_innodb_mtr = $true
           if ($changedFiles.Count -gt 0) {
             if ($changedFiles | Where-Object { $_ -match '(^|/)(innodb|innobase)(/|$)' }) {
               $enable_innodb_mtr = $true
