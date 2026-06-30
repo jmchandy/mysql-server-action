@@ -122,6 +122,7 @@ jobs:
           make package
           
       - name: Main MTR Validation
+        id: main_validation
         shell: bash
         continue-on-error: true
         run: |
@@ -164,6 +165,7 @@ jobs:
           exit $((mtr_status + unit_status))
           
       - name: Hypergraph Validation
+        id: hypergraph_validation
         if: steps.diff.outputs.enable_hypergraph == 'true'
         shell: bash
         continue-on-error: true
@@ -191,6 +193,7 @@ jobs:
             --skip-suite=rapid
           
       - name: Additional InnoDB Validation
+        id: innodb_validation
         if: steps.diff.outputs.enable_extra_mtr == 'true'
         shell: bash
         continue-on-error: true
@@ -216,6 +219,7 @@ jobs:
             --suite="$(IFS=,; echo "${extra_suites[*]}")"
       
       - name: Debug Validation
+        id: debug_validation
         if: steps.diff.outputs.build_debug_tree == 'true'
         shell: bash
         continue-on-error: true
@@ -244,6 +248,7 @@ jobs:
             2>&1 | tee "${debug_err_log}"
             
       - name: Replication Validation
+        id: replication_validation
         shell: bash
         continue-on-error: true
         run: |
@@ -321,13 +326,13 @@ jobs:
             elif [[ "$content" =~ Failed[[:space:]]*([0-9]+)/([0-9]+)[[:space:]]*tests ]]; then
               failed="${BASH_REMATCH[1]}"
               total="${BASH_REMATCH[2]}"
-              status="Completed"
+              status="Failed"
             elif [[ -n "$log" && -f "$log" ]]; then
               line="$(grep -Eo 'Failed[[:space:]]*[0-9]+/[0-9]+[[:space:]]*tests' "$log" | tail -n 1 || true)"
               if [[ "$line" =~ Failed[[:space:]]*([0-9]+)/([0-9]+)[[:space:]]*tests ]]; then
                 failed="${BASH_REMATCH[1]}"
                 total="${BASH_REMATCH[2]}"
-                status="Completed"
+                status="Failed"
               fi
             fi
             if [[ "$status" == "Completed" ]]; then
@@ -361,7 +366,15 @@ jobs:
             tests="${tests:-0}"
             failures="${failures:-0}"
          
-            echo "* ${title}: Completed"
+            local status="Completed"
+            if [[ "${failures}" != "0" ]]; then
+              status="Failed"
+            fi
+            if [[ "$status" == "Completed" ]]; then
+              echo "* ${title}: Completed"
+            else
+              echo "X ${title}: Failed"
+            fi
             echo "   No of tests: ${tests}"
             echo "   Failed: ${failures}"
             echo
@@ -376,6 +389,34 @@ jobs:
             emit_mtr_stage "Debug MTR" "${{ steps.diff.outputs.build_debug_tree }}" "${GITHUB_WORKSPACE}/build-error_debug_${GITHUB_RUN_NUMBER}.txt" "${GITHUB_WORKSPACE}/mtr_${GITHUB_RUN_NUMBER}.err"
             emit_mtr_stage "Replication MTR" "true" "${GITHUB_WORKSPACE}/build-error_replication_${GITHUB_RUN_NUMBER}.txt"
            } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Evaluate results
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          failed=0
+          check_step() {
+            local name="$1"
+            local outcome="$2"
+            local enabled="${3:-true}"
+            if [[ "$enabled" != "true" ]]; then
+              return
+            fi
+            if [[ "$outcome" != "success" ]]; then
+              echo "::error::${name} failed"
+              failed=1
+            fi
+          }
+
+          check_step "Main MTR + unit tests" "${{ steps.main_validation.outcome }}"
+          check_step "Hypergraph MTR" "${{ steps.hypergraph_validation.outcome }}" "${{ steps.diff.outputs.enable_hypergraph }}"
+          check_step "Additional InnoDB MTR" "${{ steps.innodb_validation.outcome }}" "${{ steps.diff.outputs.enable_extra_mtr }}"
+          check_step "Debug MTR" "${{ steps.debug_validation.outcome }}" "${{ steps.diff.outputs.build_debug_tree }}"
+          check_step "Replication MTR" "${{ steps.replication_validation.outcome }}"
+
+          exit "$failed"
+            
     
       - name: Artifact Organization
         if: always()
@@ -519,7 +560,7 @@ jobs:
           & 'C:\Program Files\CMake\bin\cmake.exe' --build . --target package -- /m
           
       - name: MTR Validation
-        id: mtr
+        id: main_validation
         shell: pwsh
         continue-on-error: true
         run: |
@@ -566,6 +607,7 @@ jobs:
               1st `
               2>&1 | Tee-Object -FilePath $errLog
           }
+          
       - name: Publish MTR Summary
         if: always()
         shell: pwsh
@@ -613,14 +655,14 @@ jobs:
               $failed = 0
             }
             elseif ($content -match 'Failed\s*(\d+)\/(\d+)\s*tests') {
-                $status = 'Completed'
+                $status = 'Failed'
               $failed = $Matches[1]
               $total = $Matches[2]
             }
             elseif (Test-Path $LogPath) {
               $logContent = Get-Content $LogPath -Raw -ErrorAction SilentlyContinue
               if ($logContent -match 'Failed\s*(\d+)\/(\d+)\s*tests') {
-                $status = 'Completed'
+                $status = 'Failed'
                 $failed = $Matches[1]
                 $total = $Matches[2]
               }
@@ -639,7 +681,18 @@ jobs:
             [void]$summaryLines.Add($line)
           }
           $summaryLines | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8
-          
+
+
+      - name: Evaluate results
+        if: always()
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ('${{ steps.main_validation.outcome }}' -ne 'success') {
+            Write-Host '::error::Windows MTR failed'
+            exit 1
+          }
+
       - name: Artifact Organization
         if: always()
         shell: pwsh
