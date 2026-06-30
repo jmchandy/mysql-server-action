@@ -6,7 +6,7 @@ on:
 
 jobs:
   linux-workflow:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
  
     steps:
       - name: Repository Checkout
@@ -419,7 +419,7 @@ jobs:
           path: artifacts/   
           
   windows-workflow:
-    runs-on: windows-latest
+    runs-on: windows-2025-vs2026
 
     steps:
       - name: Git Configuration
